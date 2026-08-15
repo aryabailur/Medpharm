@@ -9,88 +9,102 @@ Drug supply chain tracking from factory to hospital shelf: batch provenance, col
 
 ---
 
-## What's in this repo
+## Layout
 
-| Deployable | Path | Role |
-|---|---|---|
-| **Vayu** | `apps/vayu` | Manufacturer / supplier side — catalog, batches, QC, order approval, dispatch, telemetry console |
-| **Dhanvantari** | `apps/dhanvantari` | Institution side — inventory, POS, scan-in, complaints, reorder |
-| **Nidana** | `services/nidana` | Stateless intelligence service — forecasting, risk scoring, RCA, route optimization |
-| **Simulator** | `services/simulator` | Drives GPS + temperature along a route into `/api/sensors/ingest` |
+The repo splits along the **frontend / backend** line. UI on one side, everything the browser must never see on the other.
 
-Shared code lives in `packages/` — `contracts` (Zod schemas for every cross-app payload), `crypto` (HMAC sign/verify), `ui`.
+```
+web/
+├── frontend/          UI only — Next.js 15 App Router
+│   ├── vayu/          :3000   manufacturer / supplier
+│   └── dhanvantari/   :3001   institution (hospital / CHC / PHC)
+│
+└── backend/           DB, secrets, cross-org traffic, intelligence
+    ├── vayu-api/            :4000  Fastify + Prisma  — schema `vayu`
+    ├── dhanvantari-api/     :4001  Fastify + Prisma  — schema `dhanvantari`
+    ├── nidana/              :8000  FastAPI — stateless, owns no tables
+    ├── simulator/                  GPS + temp telemetry generator
+    ├── packages/                   contracts (Zod), crypto (HMAC), ui
+    ├── data-gen/                   synthetic generators (Python)
+    └── scripts/                    init-schemas.sql
+```
+
+Each folder has its own README with a **Part 1 / Part 2** parallel-work split:
+[frontend/](frontend/README.md) · [backend/](backend/README.md)
 
 ---
 
-## Architecture in one picture
+## Architecture
 
 ```
-  Vayu (Next.js)  ◄── signed webhooks + REST (HMAC) ──►  Dhanvantari (Next.js)
-        │                                                        │
-   schema: vayu          ONE Postgres, TWO schemas         schema: dhanvantari
-        │                  No cross-schema FKs                   │
-        └────────────────────────┬───────────────────────────────┘
-                                 ▼
-                   Nidana (FastAPI) — stateless, owns no tables
+  frontend/vayu :3000                            frontend/dhanvantari :3001
+         │  fetch + SSE                                     │  fetch + SSE
+         ▼                                                  ▼
+  ┌──────────────────┐    signed webhooks + REST    ┌──────────────────────┐
+  │  vayu-api :4000  │ ◄────────  (HMAC)  ────────► │ dhanvantari-api :4001│
+  │  schema: vayu    │                              │ schema: dhanvantari  │
+  └────────┬─────────┘                              └──────────┬───────────┘
+           │          ONE Postgres, TWO schemas                │
+           │          No cross-schema FKs. Ever.               │
+           └──────────────────┬───────────────────────────────-┘
+                              ▼
+                  ┌───────────────────────────┐
+                  │  nidana :8000  (FastAPI)  │  forecast · risk · RCA · routing
+                  │  STATELESS, owns no data  │
+                  └───────────────────────────┘
 ```
 
-Two apps, two schemas, no shared tables. Every cross-organization interaction goes over a signed HTTP contract.
+Two organisations, two schemas, **no shared tables**. Every cross-organisation interaction goes over a signed HTTP contract — either app could move to a separate database by changing one connection string (§3.1).
+
+> **Deviation from ARCHITECTURE.md §5.3:** the spec put SSE in Next.js route handlers. With UI-only frontends, SSE lives in the Fastify servers. Cross-origin CORS is now required; the Vercel 300s serverless cap no longer applies.
 
 ---
 
 ## Quick start
 
-**Prerequisites:** Node 20+, Python 3.11+, Docker (for local Postgres)
+**Prerequisites:** Node 20+, Python 3.11+, Docker
 
 ```bash
-# 1. Install dependencies
 npm install
-
-# 2. Start Postgres
-docker compose up -d
-
-# 3. Configure environment
 cp .env.example .env
 
-# 4. Run migrations (creates both schemas)
-npm run db:migrate
+npm run db:up          # Postgres + both schemas
+npm run db:migrate     # prisma migrate, both servers
 
-# 5. Start everything
-npm run dev
+npm run dev:backend    # :4000 + :4001
+npm run dev:frontend   # :3000 + :3001
 ```
 
-| Service | URL |
-|---|---|
-| Vayu | http://localhost:3000 |
-| Dhanvantari | http://localhost:3001 |
-| Nidana | http://localhost:8000 (`/docs` for OpenAPI) |
-
-**Nidana separately:**
+Nidana runs separately:
 
 ```bash
-cd services/nidana
+cd backend/nidana
 python -m venv .venv && source .venv/Scripts/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
+| Service | URL |
+|---|---|
+| Vayu (UI) | http://localhost:3000 |
+| Dhanvantari (UI) | http://localhost:3001 |
+| vayu-api | http://localhost:4000/health |
+| dhanvantari-api | http://localhost:4001/health |
+| Nidana | http://localhost:8000/docs |
+
 ---
 
-## Repo layout
+## Scripts
 
-```
-├── apps/
-│   ├── vayu/            # Next.js — manufacturer
-│   └── dhanvantari/     # Next.js — institution
-├── services/
-│   ├── nidana/          # FastAPI — forecast, risk, RCA, routing
-│   └── simulator/       # Node — GPS + temp telemetry generator
-├── packages/
-│   ├── contracts/       # Zod schemas for every cross-app payload
-│   ├── crypto/          # HMAC sign/verify
-│   └── ui/              # shared components
-└── data-gen/            # synthetic data generators (Python)
-```
+| Command | Does |
+|---|---|
+| `npm run dev` | Everything with a `dev` script |
+| `npm run dev:frontend` / `dev:backend` | One tier |
+| `npm run dev:vayu` / `dev:vayu-api` | One service |
+| `npm run db:up` / `db:down` | Docker Postgres |
+| `npm run db:migrate` / `db:generate` | Prisma, both servers |
+| `npm run db:studio:vayu` / `:dhanvantari` | Prisma Studio (:5555 / :5556) |
+| `npm run typecheck` | All workspaces |
 
 ---
 
@@ -98,7 +112,7 @@ uvicorn main:app --reload --port 8000
 
 Phases are defined in [ARCHITECTURE.md §9](ARCHITECTURE.md#9-build-order).
 
-- [x] **Phase 0** — scaffold: monorepo, Postgres, two Prisma schemas, contracts, HMAC helper
+- [x] **Phase 0** — scaffold: monorepo, frontend/backend split, two Prisma schemas, contracts, HMAC helper
 - [ ] **Phase 1** — seed data
 - [ ] **Phase 2** — Vayu catalog, batch + QR, QC
 - [ ] **Phase 3** — 🔒 order loop end-to-end *(hard gate)*
@@ -111,6 +125,8 @@ Phases are defined in [ARCHITECTURE.md §9](ARCHITECTURE.md#9-build-order).
 - [ ] **Phase 10** — RCA agent, scorecards, coverage gaps, routing
 - [ ] **Phase 11** — mobile, hardware, offline PWA
 
+Phase 0 is **structural only** — dependencies are not installed and nothing has been booted. The gate *"both apps boot, both connect"* is not yet met.
+
 ---
 
 ## Contributing
@@ -121,3 +137,5 @@ Branch → push → merge to `main`. Never commit directly to `main`. See [CLAUD
 git checkout -b feat/<name>
 git push -u origin feat/<name>
 ```
+
+Each service README defines **Part 1 / Part 2** — two file-disjoint tracks so two people can work the same service without merge conflicts.

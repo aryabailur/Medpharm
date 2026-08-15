@@ -17,7 +17,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DHANVANTARI_DATABASE_URL")
+  url      = env("DATABASE_URL")
   schemas  = ["dhanvantari"]
 }
 

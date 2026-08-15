@@ -24,10 +24,13 @@ Agent(
 ```
 
 **What Opus keeps for itself:**
-- Cross-app contract changes (`packages/contracts`) — a bad payload change breaks both apps
+- Cross-app contract changes (`backend/packages/contracts`) — a bad payload change breaks both tiers and the mobile app
 - Prisma schema design and migrations
 - Anything touching the Phase 3 order loop (the hard gate)
+- The frontend/backend boundary — deciding what may cross it
 - Final review before merge
+
+**Part 1 / Part 2 tracks.** Every service README defines two file-disjoint tracks so two workers never touch the same file. When parallelising, assign one subagent per track and give it the owned file globs verbatim from that README. Do not let a subagent stray outside its track.
 
 **What goes to Sonnet subagents:**
 - Single-surface UI components and pages
@@ -77,18 +80,35 @@ git push origin main
 
 ---
 
-## 3. Stack
+## 3. Stack & layout
+
+The repo splits **frontend / backend**. Frontends are UI-only; everything the browser must never see lives in `backend/`.
+
+```
+frontend/vayu          :3000  Next.js 15  — UI only
+frontend/dhanvantari   :3001  Next.js 15  — UI only
+backend/vayu-api       :4000  Fastify + Prisma — schema `vayu`
+backend/dhanvantari-api :4001 Fastify + Prisma — schema `dhanvantari`
+backend/nidana         :8000  FastAPI — stateless
+backend/simulator             telemetry generator
+backend/packages/             contracts (Zod), crypto (HMAC), ui
+```
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Monorepo | **npm workspaces** | pnpm needs admin on this machine; npm workspaces are sufficient |
-| Web apps | Next.js 15 App Router, TypeScript | Vayu on `:3000`, Dhanvantari on `:3001` |
+| Monorepo | **npm workspaces** | pnpm needs admin on this machine; workspaces suffice |
+| Frontend | Next.js 15 App Router, TypeScript | **No Prisma, no secrets, no HMAC** |
+| Backend | Fastify + TypeScript | Owns DB, secrets, webhooks, SSE |
 | DB | Postgres, **one instance, two schemas** | `vayu` + `dhanvantari`. **No cross-schema FKs. Ever.** |
-| ORM | Prisma, **two separate clients** | Each app has its own `schema.prisma` |
-| Intelligence | Python 3.11+ / FastAPI | `services/nidana`, stateless |
-| Real-time | **SSE** (`ReadableStream` in a route handler) | Not WebSockets, not polling. §5.3 |
-| Validation | Zod in `packages/contracts` | Shared by both apps — **not optional** |
+| ORM | Prisma, **two separate clients** | One per API server |
+| Intelligence | Python 3.11+ / FastAPI | `backend/nidana`, stateless |
+| Real-time | **SSE** from the Fastify servers | Not WebSockets, not polling. §5.3 |
+| Validation | Zod in `backend/packages/contracts` | Imported by both tiers — **not optional** |
 | Charts | Recharts | Decimate telemetry to ~200 points server-side |
+
+**Deviation from ARCHITECTURE.md §5.3:** the spec put SSE in Next.js route handlers. With UI-only frontends it lives in the Fastify servers. Cross-origin CORS is now required; the Vercel 300s cap no longer applies.
+
+**Boundary rule:** if it touches Prisma, `MEDTRACK_SHARED_SECRET`, `@medtrack/crypto`, or the other organisation, it belongs in `backend/`. A secret behind a `NEXT_PUBLIC_` prefix is not a secret.
 
 **Local DB:** Docker Compose Postgres (`docker-compose.yml`). Swap `DATABASE_URL` for Neon/Supabase before deploy.
 

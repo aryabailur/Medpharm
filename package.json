@@ -4,24 +4,30 @@
   "private": true,
   "description": "MedTrack — Drug Inventory and Supply Chain Tracking System (PS-SS04)",
   "workspaces": [
-    "apps/*",
-    "packages/*",
-    "services/simulator"
+    "frontend/*",
+    "backend/packages/*",
+    "backend/vayu-api",
+    "backend/dhanvantari-api",
+    "backend/simulator"
   ],
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
-    "dev:vayu": "npm run dev --workspace=@medtrack/vayu",
-    "dev:dhanvantari": "npm run dev --workspace=@medtrack/dhanvantari",
+    "dev:frontend": "npm run dev --workspace=@medtrack/vayu-web & npm run dev --workspace=@medtrack/dhanvantari-web",
+    "dev:backend": "npm run dev --workspace=@medtrack/vayu-api & npm run dev --workspace=@medtrack/dhanvantari-api",
+    "dev:vayu": "npm run dev --workspace=@medtrack/vayu-web",
+    "dev:dhanvantari": "npm run dev --workspace=@medtrack/dhanvantari-web",
+    "dev:vayu-api": "npm run dev --workspace=@medtrack/vayu-api",
+    "dev:dhanvantari-api": "npm run dev --workspace=@medtrack/dhanvantari-api",
     "dev:simulator": "npm run dev --workspace=@medtrack/simulator",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "db:migrate": "npm run db:migrate --workspace=@medtrack/vayu && npm run db:migrate --workspace=@medtrack/dhanvantari",
-    "db:generate": "npm run db:generate --workspace=@medtrack/vayu && npm run db:generate --workspace=@medtrack/dhanvantari",
-    "db:studio:vayu": "npm run db:studio --workspace=@medtrack/vayu",
-    "db:studio:dhanvantari": "npm run db:studio --workspace=@medtrack/dhanvantari"
+    "db:migrate": "npm run db:migrate --workspace=@medtrack/vayu-api && npm run db:migrate --workspace=@medtrack/dhanvantari-api",
+    "db:generate": "npm run db:generate --workspace=@medtrack/vayu-api && npm run db:generate --workspace=@medtrack/dhanvantari-api",
+    "db:studio:vayu": "npm run db:studio --workspace=@medtrack/vayu-api",
+    "db:studio:dhanvantari": "npm run db:studio --workspace=@medtrack/dhanvantari-api"
   },
   "devDependencies": {
     "typescript": "^5.6.0"
