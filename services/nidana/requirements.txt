@@ -1,0 +1,20 @@
+# Nidana — intelligence service
+# ARCHITECTURE.md §3.2
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# Forecasting: LightGBM point regressor + two quantile regressors
+# (alpha=0.10, alpha=0.90) for the P10/P90 band. §6.4
+lightgbm==4.5.0
+scikit-learn==1.6.0
+pandas==2.2.3
+numpy==2.2.1
+
+# Explainability: shap.TreeExplainer -> top 3-5 attributions, mapped to plain
+# language. Never show raw feature names in the UI. §6.4
+shap==0.46.0
+
+# Route optimization: nearest-neighbour + 2-opt over haversine / OSRM. §6.5
+httpx==0.28.1

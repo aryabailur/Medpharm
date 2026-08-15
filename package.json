@@ -1,0 +1,32 @@
+{
+  "name": "medtrack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MedTrack — Drug Inventory and Supply Chain Tracking System (PS-SS04)",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/simulator"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:vayu": "npm run dev --workspace=@medtrack/vayu",
+    "dev:dhanvantari": "npm run dev --workspace=@medtrack/dhanvantari",
+    "dev:simulator": "npm run dev --workspace=@medtrack/simulator",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run db:migrate --workspace=@medtrack/vayu && npm run db:migrate --workspace=@medtrack/dhanvantari",
+    "db:generate": "npm run db:generate --workspace=@medtrack/vayu && npm run db:generate --workspace=@medtrack/dhanvantari",
+    "db:studio:vayu": "npm run db:studio --workspace=@medtrack/vayu",
+    "db:studio:dhanvantari": "npm run db:studio --workspace=@medtrack/dhanvantari"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

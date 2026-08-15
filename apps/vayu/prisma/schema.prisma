@@ -1,0 +1,379 @@
+// Vayu — manufacturer / supplier schema
+// ARCHITECTURE.md §4.2
+//
+// Owns schema `vayu` in the shared Postgres instance.
+// NO FOREIGN KEYS to the `dhanvantari` schema. Ever. (§3.1)
+//
+// SCAFFOLD: models are declared per §4.2 but this has not been migrated.
+// Run `npm run db:migrate` in Phase 0 to create the tables.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("VAYU_DATABASE_URL")
+  schemas  = ["vayu"]
+}
+
+// ─── Catalogue & manufacturing ───────────────────────────────────────────────
+
+model Drug {
+  id            String   @id @default(uuid())
+  name          String
+  genericName   String?
+  nlemCode      String?  @unique
+  category      String?
+  packSize      String?
+  coldChain     Boolean  @default(false)
+  minTempC      Float?
+  maxTempC      Float?
+  shelfLifeDays Int?
+
+  batches         Batch[]
+  supplyOrderLine SupplyOrderLine[]
+  consumption     ConsumptionFeed[]
+
+  @@schema("vayu")
+}
+
+model Batch {
+  id         String      @id // UUIDv7, global — §4.1
+  drugId     String
+  lotNumber  String
+  mfgDate    DateTime
+  expiryDate DateTime
+  quantity   Int
+  qrPayload  String?
+  status     BatchStatus @default(MANUFACTURED)
+
+  drug           Drug            @relation(fields: [drugId], references: [id])
+  qcRecords      QCRecord[]
+  shipmentBatch  ShipmentBatch[]
+  complaints     Complaint[]
+
+  @@index([drugId])
+  @@index([status])
+  @@schema("vayu")
+}
+
+enum BatchStatus {
+  MANUFACTURED
+  QC_APPROVED
+  QC_FAILED
+  WAREHOUSED
+  DISPATCHED
+  DELIVERED
+
+  @@schema("vayu")
+}
+
+model QCRecord {
+  id             String   @id @default(uuid())
+  batchId        String
+  result         QCResult
+  inspector      String?
+  notes          String?
+  testedAt       DateTime @default(now())
+  certificateUrl String?
+
+  batch Batch @relation(fields: [batchId], references: [id])
+
+  @@index([batchId])
+  @@schema("vayu")
+}
+
+enum QCResult {
+  PASS
+  FAIL
+
+  @@schema("vayu")
+}
+
+// ─── Network ─────────────────────────────────────────────────────────────────
+
+model Institution {
+  id         String          @id @default(uuid())
+  name       String
+  type       InstitutionType
+  district   String?
+  state      String?
+  lat        Float?
+  lng        Float?
+  population Int?
+  tier       String?
+
+  supplyOrders SupplyOrder[]
+  complaints   Complaint[]
+  consumption  ConsumptionFeed[]
+
+  @@index([district])
+  @@schema("vayu")
+}
+
+enum InstitutionType {
+  PHC
+  CHC
+  DISTRICT_HOSPITAL
+  WAREHOUSE
+  RETAIL
+
+  @@schema("vayu")
+}
+
+// ─── Order flow (Phase 3 — the hard gate) ────────────────────────────────────
+
+model SupplyOrder {
+  id              String            @id // UUIDv7, global — §4.1
+  institutionId   String
+  status          SupplyOrderStatus @default(PENDING)
+  requestedWindow String?
+  rejectionReason String?
+  placedAt        DateTime          @default(now())
+
+  institution Institution       @relation(fields: [institutionId], references: [id])
+  lines       SupplyOrderLine[]
+  shipments   Shipment[]
+
+  @@index([status])
+  @@index([institutionId])
+  @@schema("vayu")
+}
+
+enum SupplyOrderStatus {
+  PENDING
+  APPROVED
+  PARTIAL
+  REJECTED
+  DISPATCHED
+  DELIVERED
+
+  @@schema("vayu")
+}
+
+model SupplyOrderLine {
+  id           String @id @default(uuid())
+  orderId      String
+  drugId       String
+  qtyRequested Int
+  qtyApproved  Int?
+
+  order SupplyOrder @relation(fields: [orderId], references: [id])
+  drug  Drug        @relation(fields: [drugId], references: [id])
+
+  @@index([orderId])
+  @@schema("vayu")
+}
+
+// ─── Shipment & cold chain ───────────────────────────────────────────────────
+
+model Shipment {
+  id                     String         @id // UUIDv7, global — §4.1
+  supplyOrderId          String
+  originWarehouseId      String?
+  destinationInstitution String?
+  status                 ShipmentStatus @default(DRAFT)
+  dispatchedAt           DateTime?
+  etaAt                  DateTime?
+  deliveredAt            DateTime?
+  routePolyline          String?
+  coldChain              Boolean        @default(false)
+  excursionCount         Int            @default(0)
+
+  // Live position, updated by /api/sensors/ingest — §6.1
+  lastKnownLat Float?
+  lastKnownLng Float?
+  lastTempC    Float?
+  progressPct  Float?
+
+  supplyOrder SupplyOrder      @relation(fields: [supplyOrderId], references: [id])
+  batches     ShipmentBatch[]
+  telemetry   TelemetryPoint[]
+  excursions  Excursion[]
+  complaints  Complaint[]
+
+  @@index([status])
+  @@index([supplyOrderId])
+  @@schema("vayu")
+}
+
+enum ShipmentStatus {
+  DRAFT
+  DISPATCHED
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  EXCEPTION
+
+  @@schema("vayu")
+}
+
+model ShipmentBatch {
+  shipmentId String
+  batchId    String
+  quantity   Int
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id])
+  batch    Batch    @relation(fields: [batchId], references: [id])
+
+  @@id([shipmentId, batchId])
+  @@schema("vayu")
+}
+
+// Largest table in the system. Write raw, read downsampled to ~200 points
+// server-side before charting. Do NOT ship 4,000 points to the browser. §4.4
+model TelemetryPoint {
+  id         String          @id @default(uuid())
+  shipmentId String
+  ts         DateTime
+  lat        Float?
+  lng        Float?
+  tempC      Float?
+  humidity   Float?
+  source     TelemetrySource @default(SIMULATED)
+  deviceId   String?
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id])
+
+  @@index([shipmentId, ts])
+  @@schema("vayu")
+}
+
+enum TelemetrySource {
+  SIMULATED
+  DEVICE
+
+  @@schema("vayu")
+}
+
+// Fired with hysteresis, not a bare threshold: out of band for >= 3 consecutive
+// readings or >= 60s. Severity rules in §6.1.
+model Excursion {
+  id           String            @id @default(uuid())
+  shipmentId   String
+  startedAt    DateTime
+  endedAt      DateTime?
+  minTempC     Float?
+  maxTempC     Float?
+  durationMin  Int?
+  severity     ExcursionSeverity
+  acknowledged Boolean           @default(false)
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id])
+
+  @@index([shipmentId])
+  @@schema("vayu")
+}
+
+enum ExcursionSeverity {
+  MINOR
+  MAJOR
+  CRITICAL
+
+  @@schema("vayu")
+}
+
+// ─── Complaints & feedback ───────────────────────────────────────────────────
+
+model Complaint {
+  id              String            @id @default(uuid())
+  shipmentId      String?
+  batchId         String?
+  institutionId   String?
+  category        ComplaintCategory
+  description     String?
+  photoUrls       String[]
+  filedAt         DateTime          @default(now())
+  status          ComplaintStatus   @default(OPEN)
+  assignedTeam    AssignedTeam?
+  resolutionNotes String?
+  rcaJson         Json? // Nidana /rca output, cached — §6.3
+
+  shipment    Shipment?    @relation(fields: [shipmentId], references: [id])
+  batch       Batch?       @relation(fields: [batchId], references: [id])
+  institution Institution? @relation(fields: [institutionId], references: [id])
+
+  @@index([status, filedAt])
+  @@schema("vayu")
+}
+
+enum ComplaintCategory {
+  BREAKAGE
+  QTY_MISMATCH
+  SEAL_TAMPERED
+  TEMP_DAMAGE
+  WRONG_ITEM
+  NEAR_EXPIRY
+
+  @@schema("vayu")
+}
+
+enum ComplaintStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+
+  @@schema("vayu")
+}
+
+enum AssignedTeam {
+  QC
+  LOGISTICS
+
+  @@schema("vayu")
+}
+
+// Pushed up from Dhanvantari via /api/consumption/report — §5.1
+model ConsumptionFeed {
+  id            String   @id @default(uuid())
+  institutionId String
+  drugId        String
+  periodMonth   String
+  opening       Int?
+  received      Int?
+  dispensed     Int?
+  closing       Int?
+  receivedAt    DateTime @default(now())
+
+  institution Institution @relation(fields: [institutionId], references: [id])
+  drug        Drug        @relation(fields: [drugId], references: [id])
+
+  @@index([institutionId, drugId])
+  @@schema("vayu")
+}
+
+// ─── Cross-app delivery guarantees (§5.2) ────────────────────────────────────
+
+// Retry queue: 1s, 4s, 16s, 60s then park as FAILED with a manual replay
+// button. This is what saves the demo when the venue wifi drops.
+model OutboundEvent {
+  id          String              @id @default(uuid())
+  type        String
+  payloadJson Json
+  targetUrl   String
+  attempts    Int                 @default(0)
+  status      OutboundEventStatus @default(PENDING)
+  nextRetryAt DateTime?
+  createdAt   DateTime            @default(now())
+
+  @@index([status, nextRetryAt])
+  @@schema("vayu")
+}
+
+enum OutboundEventStatus {
+  PENDING
+  SENT
+  FAILED
+
+  @@schema("vayu")
+}
+
+// Idempotency: store every seen X-MedTrack-Event-Id. Duplicate -> 200, do
+// nothing. Without this you get double stock entries on stage. §5.2
+model ProcessedEvent {
+  eventId     String   @id
+  processedAt DateTime @default(now())
+
+  @@schema("vayu")
+}
