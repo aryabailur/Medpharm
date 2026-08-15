@@ -1,0 +1,27 @@
+{
+  "name": "@medtrack/dhanvantari-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dhanvantari frontend — institution (hospital / CHC / PHC). UI only; all server work lives in backend/dhanvantari-api.",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@medtrack/contracts": "*",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^2.15.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.0"
+  }
+}

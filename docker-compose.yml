@@ -13,7 +13,7 @@ services:
       - medtrack_pgdata:/var/lib/postgresql/data
       # Creates the `vayu` and `dhanvantari` schemas on first boot.
       # Prisma migrations then run inside them. No cross-schema FKs. Ever.
-      - ./scripts/init-schemas.sql:/docker-entrypoint-initdb.d/01-init-schemas.sql:ro
+      - ./backend/scripts/init-schemas.sql:/docker-entrypoint-initdb.d/01-init-schemas.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d medtrack"]
       interval: 5s

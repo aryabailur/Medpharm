@@ -1,22 +1,17 @@
 {
-  "name": "@medtrack/dhanvantari",
+  "name": "@medtrack/vayu-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Dhanvantari — institution (hospital / CHC / PHC) side",
+  "description": "Vayu frontend — manufacturer / supplier. UI only; all server work lives in backend/vayu-api.",
   "scripts": {
-    "dev": "next dev --port 3001",
+    "dev": "next dev --port 3000",
     "build": "next build",
-    "start": "next start --port 3001",
+    "start": "next start --port 3000",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio --port 5556"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@medtrack/contracts": "*",
-    "@medtrack/crypto": "*",
-    "@prisma/client": "^6.1.0",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -27,7 +22,6 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "prisma": "^6.1.0",
     "typescript": "^5.6.0"
   }
 }
