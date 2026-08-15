@@ -1,0 +1,167 @@
+// Dhanvantari — institution (hospital / CHC / PHC / medical store) schema
+// ARCHITECTURE.md §4.3
+//
+// Owns schema `dhanvantari` in the shared Postgres instance.
+// NO FOREIGN KEYS to the `vayu` schema. Ever. (§3.1)
+//
+// NOTE (v1.1): the v1 doc said "new models only (existing inventory/POS
+// untouched)". There was no existing inventory/POS — Drug, Inventory and
+// Dispense are built from scratch here.
+//
+// SCAFFOLD: models are declared per §4.3 but this has not been migrated.
+// Run `npm run db:migrate` in Phase 0 to create the tables.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DHANVANTARI_DATABASE_URL")
+  schemas  = ["dhanvantari"]
+}
+
+// ─── Core inventory & POS (built from scratch) ───────────────────────────────
+
+// Local catalogue mirror. Populated from the NLEM seed and from scanned
+// batches. Not FK'd to Vayu's Drug — the boundary is HTTP only.
+model Drug {
+  id          String  @id @default(uuid())
+  name        String
+  genericName String?
+  nlemCode    String? @unique
+  category    String?
+  packSize    String?
+  coldChain   Boolean @default(false)
+  unitPrice   Float?
+
+  inventory Inventory[]
+  dispenses Dispense[]
+
+  @@schema("dhanvantari")
+}
+
+model Inventory {
+  id           String    @id @default(uuid())
+  drugId       String
+  batchRef     String? // = Vayu batchId when the stock arrived via a shipment
+  qtyOnHand    Int       @default(0)
+  reorderPoint Int       @default(0)
+  expiryDate   DateTime?
+  location     String?
+  updatedAt    DateTime  @updatedAt
+
+  drug Drug @relation(fields: [drugId], references: [id])
+
+  @@index([drugId])
+  @@index([expiryDate])
+  @@schema("dhanvantari")
+}
+
+// The POS / dispensing ledger. Feeds consumption.trend (V7) and the
+// periodic /api/consumption/report push up to Vayu (§5.1).
+model Dispense {
+  id          String   @id @default(uuid())
+  drugId      String
+  batchRef    String?
+  qty         Int
+  dispensedAt DateTime @default(now())
+  dispensedBy String?
+  patientRef  String?
+
+  drug Drug @relation(fields: [drugId], references: [id])
+
+  @@index([drugId, dispensedAt])
+  @@schema("dhanvantari")
+}
+
+// ─── Cross-app mirrors ───────────────────────────────────────────────────────
+// IDs here are echoes of Vayu's UUIDv7s. This app never invents one. (§4.1)
+
+model IncomingShipment {
+  id            String    @id // = Vayu shipmentId
+  supplyOrderId String?
+  status        String
+  etaAt         DateTime?
+  coldChain     Boolean   @default(false)
+  anomalyFlag   Boolean   @default(false)
+  lastKnownLat  Float?
+  lastKnownLng  Float?
+  lastTempC     Float?
+  progressPct   Float?
+  updatedAt     DateTime  @updatedAt
+
+  receivedBatches ReceivedBatch[]
+
+  @@index([status])
+  @@schema("dhanvantari")
+}
+
+model ReceivedBatch {
+  id                 String   @id // = Vayu batchId
+  incomingShipmentId String?
+  drugRef            String?
+  qtyExpected        Int?
+  qtyReceived        Int?
+  conditionPhotoUrls String[]
+  scannedAt          DateTime @default(now())
+  scannedBy          String?
+  accepted           Boolean  @default(false)
+
+  incomingShipment IncomingShipment? @relation(fields: [incomingShipmentId], references: [id])
+
+  @@index([incomingShipmentId])
+  @@schema("dhanvantari")
+}
+
+model LocalComplaint {
+  id           String   @id @default(uuid())
+  batchId      String?
+  shipmentId   String?
+  category     String
+  description  String?
+  photoUrls    String[]
+  filedAt      DateTime @default(now())
+  remoteStatus String? // mirrors Vayu's Complaint.status via webhook
+  rcaSummary   String? // manufacturer's RCA, pushed down (§6.3)
+
+  @@index([remoteStatus])
+  @@schema("dhanvantari")
+}
+
+// The scorecard PS-SS04 explicitly asks for: the institution rates its
+// supplier. Recomputed from delivery history. (§1)
+model SupplierScore {
+  supplierId       String   @id
+  onTimePct        Float?
+  rejectionRatePct Float?
+  priceVariancePct Float?
+  excursionRate    Float?
+  computedAt       DateTime @default(now())
+
+  @@schema("dhanvantari")
+}
+
+// ─── Cross-app delivery guarantees (§5.2) ────────────────────────────────────
+
+model OutboundEvent {
+  id          String    @id @default(uuid())
+  type        String
+  payloadJson Json
+  targetUrl   String
+  attempts    Int       @default(0)
+  status      String    @default("PENDING")
+  nextRetryAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([status, nextRetryAt])
+  @@schema("dhanvantari")
+}
+
+// Idempotency: duplicate X-MedTrack-Event-Id -> 200, do nothing. (§5.2)
+model ProcessedEvent {
+  eventId     String   @id
+  processedAt DateTime @default(now())
+
+  @@schema("dhanvantari")
+}

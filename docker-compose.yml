@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: medtrack-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: medtrack
+    ports:
+      - "5432:5432"
+    volumes:
+      - medtrack_pgdata:/var/lib/postgresql/data
+      # Creates the `vayu` and `dhanvantari` schemas on first boot.
+      # Prisma migrations then run inside them. No cross-schema FKs. Ever.
+      - ./scripts/init-schemas.sql:/docker-entrypoint-initdb.d/01-init-schemas.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d medtrack"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  medtrack_pgdata:
