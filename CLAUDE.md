@@ -1,0 +1,116 @@
+# CLAUDE.md — MedTrack (web)
+
+Instructions for Claude Code working in this repository.
+
+Read [ARCHITECTURE.md](ARCHITECTURE.md) before starting any feature. It is the single source of truth for the data model, cross-app contract, and build order.
+
+---
+
+## 1. Orchestration model
+
+**Opus 5 orchestrates. Sonnet 5 executes.**
+
+- The **top-level session runs on Opus 5** (`claude-opus-5`). It owns planning, architecture decisions, task decomposition, integration, and review.
+- **Delegate implementation work to Sonnet 5 subagents** (`claude-sonnet-5`) via the Agent tool with `model: "sonnet"`.
+- Launch independent subagents **in parallel** — one message, multiple Agent tool calls.
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  model: "sonnet",
+  description: "Implement excursion detector",
+  prompt: "<full context: files, contract, acceptance criteria>"
+)
+```
+
+**What Opus keeps for itself:**
+- Cross-app contract changes (`packages/contracts`) — a bad payload change breaks both apps
+- Prisma schema design and migrations
+- Anything touching the Phase 3 order loop (the hard gate)
+- Final review before merge
+
+**What goes to Sonnet subagents:**
+- Single-surface UI components and pages
+- One API route with a defined request/response shape
+- Test writing, seed/generator scripts
+- Nidana endpoint implementations against a fixed Pydantic schema
+
+**Rules for delegation:**
+- Give each subagent the **full contract it must honour** — the Zod/Pydantic schema, the file paths, and the acceptance criteria. A subagent that has to guess the payload shape will invent one.
+- Never have two subagents edit the same file concurrently.
+- Opus verifies every subagent's output against the phase gate before merging.
+
+---
+
+## 2. Git workflow
+
+**Never commit directly to `main`.**
+
+Every feature follows this cycle:
+
+```bash
+git checkout main && git pull origin main
+git checkout -b feat/<short-name>
+# ... work ...
+git add -A && git commit -m "<message>"
+git push -u origin feat/<short-name>
+gh pr create --fill        # or merge directly if solo
+git checkout main && git merge --no-ff feat/<short-name>
+git push origin main
+```
+
+**Branch naming:**
+
+| Prefix | Use |
+|---|---|
+| `feat/` | new feature |
+| `fix/` | bug fix |
+| `chore/` | tooling, deps, config |
+| `docs/` | documentation only |
+| `phase/N-<name>` | a whole build-order phase from §9 |
+
+**Rules:**
+- **Branch → push → merge to main.** Push the branch before merging, so the work is recoverable if a laptop dies mid-hackathon.
+- Merge with `--no-ff` so each feature is a visible unit in history.
+- `main` must always boot. If a merge breaks `main`, revert first and fix on a branch.
+- Commit at every phase gate in ARCHITECTURE.md §9, even if the phase is incomplete.
+
+---
+
+## 3. Stack
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Monorepo | **npm workspaces** | pnpm needs admin on this machine; npm workspaces are sufficient |
+| Web apps | Next.js 15 App Router, TypeScript | Vayu on `:3000`, Dhanvantari on `:3001` |
+| DB | Postgres, **one instance, two schemas** | `vayu` + `dhanvantari`. **No cross-schema FKs. Ever.** |
+| ORM | Prisma, **two separate clients** | Each app has its own `schema.prisma` |
+| Intelligence | Python 3.11+ / FastAPI | `services/nidana`, stateless |
+| Real-time | **SSE** (`ReadableStream` in a route handler) | Not WebSockets, not polling. §5.3 |
+| Validation | Zod in `packages/contracts` | Shared by both apps — **not optional** |
+| Charts | Recharts | Decimate telemetry to ~200 points server-side |
+
+**Local DB:** Docker Compose Postgres (`docker-compose.yml`). Swap `DATABASE_URL` for Neon/Supabase before deploy.
+
+---
+
+## 4. Non-negotiables
+
+These are in ARCHITECTURE.md but are repeated here because they are easy to skip and expensive to retrofit:
+
+- **HMAC-sign every cross-app request.** Timestamp + constant-time compare + 5-minute replay window. §5.2
+- **Idempotency on every webhook receiver.** Store `X-MedTrack-Event-Id`; duplicate → `200`, do nothing. Without this you get double stock entries on stage.
+- **The LLM never sees the database.** Intent → deterministic Prisma call → evidence JSON → LLM narrates. **Never generate SQL from an LLM.** §7
+- **Every Nidana endpoint needs a deterministic TypeScript fallback** shipped *first*. Nidana must never be a single point of demo failure. §3.2
+- **UUIDv7 for `batchId`, `shipmentId`, `supplyOrderId`.** Neither app ever invents an ID; it only echoes one it received. §4.1
+- **Terminology:** supplier/manufacturer vs institution. Fix the words in the UI, not just the pitch. §1
+
+---
+
+## 5. Working rules
+
+- **End of every phase, the demo runs end-to-end.** Never leave a half-integrated feature overnight. §9
+- **Phase 3 (order loop) is a hard gate.** Nothing else starts until placing an order in Dhanvantari flips its status in Vayu.
+- Don't add a dependency without checking whether the stack already covers it.
+- Don't build Phase 10–11 items (mobile, hardware, offline PWA, route optimizer) until Phases 0–9 are green. They are the cut list.
+- When a subagent reports "done," verify against the phase gate — don't take it at face value.
