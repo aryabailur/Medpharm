@@ -180,6 +180,162 @@ export async function forecast(input: ForecastInput): Promise<ForecastResult> {
   return remote ? { ...remote, source: 'nidana' } : forecastFallback(input);
 }
 
+// ─── RCA (§6.3) ───────────────────────────────────────────────────────────
+
+export interface RcaComplaintInput {
+  complaint: Record<string, unknown>;
+  product: Record<string, unknown>;
+  excursions: Array<Record<string, unknown>>;
+  shipment: Record<string, unknown>;
+  history: Record<string, unknown>;
+}
+
+export interface RcaComplaintResult {
+  probableCause: string;
+  contributingPattern: string | null;
+  recommendedActions: string[];
+  source: 'nidana' | 'fallback';
+}
+
+export interface RcaCategoryCount { category: string; count: number; pct: number }
+export interface RcaNamedCount { label: string; count: number }
+
+export interface RcaInsightsInput {
+  totalComplaints: number;
+  byCategory: RcaCategoryCount[];
+  byTeam: RcaNamedCount[];
+  excursionSeverity: RcaNamedCount[];
+  monthlyTrend: RcaNamedCount[];
+}
+
+export interface RcaChartInsight { cause: string; suggestion: string }
+export interface RcaCategoryInsight extends RcaChartInsight { category: string }
+
+export interface RcaInsightsResult {
+  categoryInsights: RcaCategoryInsight[];
+  teamInsight: RcaChartInsight;
+  excursionInsight: RcaChartInsight;
+  trendInsight: RcaChartInsight;
+  source: 'nidana' | 'fallback';
+}
+
+/** Deterministic template — what caused it, keyed by complaint category (§6.3 fallback path). */
+const CATEGORY_SUGGESTION: Record<string, string> = {
+  TEMP_DAMAGE: 'Audit cold-chain handling and pre-cool checks for the routes and carriers behind these shipments.',
+  SEAL_TAMPERED: 'Tighten seal verification at dispatch and again at receiving; review custody handoffs on the affected route.',
+  QTY_MISMATCH: 'Cross-check manifest counts against dispatch scans; investigate the specific warehouse and shift involved.',
+  WRONG_ITEM: 'Add a second-check step at pick-and-pack for this drug/institution pairing.',
+  NEAR_EXPIRY: 'Review FEFO (first-expiry-first-out) allocation for this drug in the dispatch queue.',
+  BREAKAGE: 'Review packaging and handling procedures for this drug’s pack size on the affected route.',
+};
+
+export function rcaComplaintFallback(input: RcaComplaintInput): RcaComplaintResult {
+  const complaint = input.complaint as { category?: string; description?: string };
+  const excursions = input.excursions ?? [];
+  const history = input.history as { sameDrug90d?: number; sameInstitution90d?: number; sameCategory90d?: number };
+  const category = complaint.category ?? 'UNKNOWN';
+
+  const parts: string[] = [`This is a ${category} complaint.`];
+  if (excursions.length > 0) {
+    const worst = excursions.reduce((a: any, b: any) => ((b.maxTempC ?? -Infinity) > (a.maxTempC ?? -Infinity) ? b : a));
+    parts.push(
+      `The linked shipment recorded ${excursions.length} excursion(s), the worst reaching ${worst.maxTempC ?? '?'}°C for ${worst.durationMin ?? '?'} minutes (${worst.severity ?? 'unknown'} severity).`,
+    );
+  }
+  if (history?.sameCategory90d) {
+    parts.push(`${history.sameCategory90d} other ${category} complaint(s) were filed in the last 90 days.`);
+  }
+
+  return {
+    probableCause: parts.join(' '),
+    contributingPattern:
+      (history?.sameInstitution90d ?? 0) >= 2
+        ? `This institution has filed ${history.sameInstitution90d} complaints in the last 90 days — a recurring pattern, not an isolated event.`
+        : null,
+    recommendedActions: [CATEGORY_SUGGESTION[category] ?? 'Investigate this complaint against batch QC and shipment records.'],
+    source: 'fallback',
+  };
+}
+
+export function rcaInsightsFallback(input: RcaInsightsInput): RcaInsightsResult {
+  const pct = (n: number) => (input.totalComplaints > 0 ? Math.round((n / input.totalComplaints) * 100) : 0);
+
+  const categoryInsights: RcaCategoryInsight[] = input.byCategory.map((c) => ({
+    category: c.category,
+    cause: `${c.category} accounts for ${c.count} of ${input.totalComplaints} complaints (${pct(c.count)}%).`,
+    suggestion: CATEGORY_SUGGESTION[c.category] ?? 'Investigate this category against batch QC and shipment records.',
+  }));
+
+  const topTeam = [...input.byTeam].sort((a, b) => b.count - a.count)[0];
+  const teamInsight: RcaChartInsight = topTeam
+    ? {
+        cause: `${topTeam.label} is assigned ${topTeam.count} of ${input.totalComplaints} complaints (${pct(topTeam.count)}%).`,
+        suggestion: topTeam.label === 'LOGISTICS'
+          ? 'Review handling and cold-chain SOPs with the logistics/carrier team.'
+          : 'Review QC release criteria for the batches behind these complaints.',
+      }
+    : { cause: 'No complaints are assigned to a team yet.', suggestion: 'Triage open complaints to QC or Logistics.' };
+
+  const worstExcursion = [...input.excursionSeverity].sort((a, b) => b.count - a.count)[0];
+  const excursionInsight: RcaChartInsight = worstExcursion
+    ? {
+        cause: `${worstExcursion.count} complaint-linked shipment(s) recorded a ${worstExcursion.label} excursion.`,
+        suggestion: 'Prioritise cold-chain audits on the carriers/routes behind these excursions.',
+      }
+    : { cause: 'No complaint is linked to a temperature excursion.', suggestion: 'No cold-chain action indicated.' };
+
+  const trend = input.monthlyTrend;
+  const rising = trend.length >= 2 && trend[trend.length - 1]!.count > trend[trend.length - 2]!.count;
+  const trendInsight: RcaChartInsight = trend.length
+    ? {
+        cause: `Complaint volume is ${rising ? 'rising' : 'flat or falling'} — ${trend[trend.length - 1]!.count} filed in ${trend[trend.length - 1]!.label}.`,
+        suggestion: rising ? 'Investigate what changed recently — a new route, carrier, or batch — before volume grows further.' : 'No trend-driven action indicated.',
+      }
+    : { cause: 'Not enough history for a trend.', suggestion: 'Revisit once more months of data are available.' };
+
+  return { categoryInsights, teamInsight, excursionInsight, trendInsight, source: 'fallback' };
+}
+
+export async function rcaComplaint(input: RcaComplaintInput): Promise<RcaComplaintResult> {
+  const remote = await callNidana<{ probable_cause: string; contributing_pattern: string | null; recommended_actions: string[] }>(
+    '/rca',
+    input,
+  );
+  return remote
+    ? {
+        probableCause: remote.probable_cause,
+        contributingPattern: remote.contributing_pattern,
+        recommendedActions: remote.recommended_actions,
+        source: 'nidana',
+      }
+    : rcaComplaintFallback(input);
+}
+
+export async function rcaInsights(input: RcaInsightsInput): Promise<RcaInsightsResult> {
+  const remote = await callNidana<{
+    category_insights: Array<{ category: string; cause: string; suggestion: string }>;
+    team_insight: RcaChartInsight;
+    excursion_insight: RcaChartInsight;
+    trend_insight: RcaChartInsight;
+  }>('/rca/insights', {
+    total_complaints: input.totalComplaints,
+    by_category: input.byCategory,
+    by_team: input.byTeam.map((t) => ({ label: t.label, count: t.count })),
+    excursion_severity: input.excursionSeverity.map((t) => ({ label: t.label, count: t.count })),
+    monthly_trend: input.monthlyTrend.map((t) => ({ label: t.label, count: t.count })),
+  });
+
+  return remote
+    ? {
+        categoryInsights: remote.category_insights,
+        teamInsight: remote.team_insight,
+        excursionInsight: remote.excursion_insight,
+        trendInsight: remote.trend_insight,
+        source: 'nidana',
+      }
+    : rcaInsightsFallback(input);
+}
+
 export async function risk(input: RiskInput): Promise<RiskResult> {
   const remote = await callNidana<Omit<RiskResult, 'source'>>('/risk', {
     institution_id: input.institutionId,

@@ -296,6 +296,69 @@ function Empty2() {
   );
 }
 
+// ─── PieChart ─────────────────────────────────────────────────────────────
+
+export function PieChart({
+  data,
+  size = 160,
+  innerRadiusRatio = 0.55,
+}: {
+  data: Array<{ label: string; value: number; color: string }>;
+  size?: number;
+  innerRadiusRatio?: number;
+}) {
+  const total = data.reduce((a, d) => a + d.value, 0);
+  if (data.length === 0 || total <= 0) {
+    return <Empty2 />;
+  }
+
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - 2;
+  const rInner = r * innerRadiusRatio;
+
+  const arc = (startFrac: number, endFrac: number) => {
+    const a0 = startFrac * 2 * Math.PI - Math.PI / 2;
+    const a1 = endFrac * 2 * Math.PI - Math.PI / 2;
+    const large = endFrac - startFrac > 0.5 ? 1 : 0;
+    const p = (rad: number, radius: number) => [cx + radius * Math.cos(rad), cy + radius * Math.sin(rad)];
+    const [x0, y0] = p(a0, r);
+    const [x1, y1] = p(a1, r);
+    const [ix1, iy1] = p(a1, rInner);
+    const [ix0, iy0] = p(a0, rInner);
+    return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} L ${ix1} ${iy1} A ${rInner} ${rInner} 0 ${large} 0 ${ix0} ${iy0} Z`;
+  };
+
+  // A single 100%-share slice degenerates the arc math above (start === end
+  // after wraparound), so draw it as a plain ring instead.
+  if (data.filter((d) => d.value > 0).length === 1) {
+    const only = data.find((d) => d.value > 0)!;
+    return (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={cx} cy={cy} r={(r + rInner) / 2} fill="none" stroke={only.color} strokeWidth={r - rInner} />
+      </svg>
+    );
+  }
+
+  let acc = 0;
+  const slices = data
+    .filter((d) => d.value > 0)
+    .map((d) => {
+      const start = acc / total;
+      acc += d.value;
+      const end = acc / total;
+      return { ...d, path: arc(start, end) };
+    });
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {slices.map((s) => (
+        <path key={s.label} d={s.path} fill={s.color} stroke={C.surface} strokeWidth={1.5} />
+      ))}
+    </svg>
+  );
+}
+
 // ─── ScatterPlot ──────────────────────────────────────────────────────────
 
 export function ScatterPlot({

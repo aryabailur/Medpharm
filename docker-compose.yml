@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: medtrack
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - medtrack_pgdata:/var/lib/postgresql/data
       # Creates the `vayu` and `dhanvantari` schemas on first boot.
