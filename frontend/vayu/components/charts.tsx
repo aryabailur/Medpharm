@@ -5,6 +5,16 @@
  * default visual language don't match the operations-terminal read. Every
  * primitive here guards empty data, a single point, and all-equal values so a
  * zero denominator never reaches an SVG coordinate as NaN.
+ *
+ * Layout fixes applied (2026-08-18):
+ *  - All full-width SVGs use a responsive wrapper div instead of
+ *    preserveAspectRatio="none" which stretched/skewed text and labels.
+ *  - Y-axis value labels moved to their own left gutter column.
+ *  - Horizontal BarChart label column widens to fit longer district names.
+ *  - Histogram and BarChart padL included so first bar isn't clipped.
+ *  - ScatterPlot Y-label uses foreignObject instead of rotated SVG text so
+ *    it survives aspect-ratio-preserving viewBox scaling.
+ *  - ForecastTrend uses xMidYMid meet so forecast band isn't squished.
  */
 
 import { C, FONT, MONO } from '../lib/theme';
@@ -34,19 +44,17 @@ export function LineChart({
 }) {
   const W = 600;
   const H = height;
-  const padL = 8;
-  const padR = 8;
-  const padT = 10;
-  const padB = 18;
+  const padL = 42;   // left gutter for Y-axis labels
+  const padR = 12;
+  const padT = 14;
+  const padB = 22;
   const stroke = color ?? C.accent;
 
   if (series.length === 0) {
     return (
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-        <text x={W / 2} y={H / 2} textAnchor="middle" style={{ font: `400 11px ${FONT}`, fill: C.inkGhost }}>
-          No data
-        </text>
-      </svg>
+      <div style={{ height: H, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ font: `400 11px ${FONT}`, color: C.inkGhost }}>No data</span>
+      </div>
     );
   }
 
@@ -64,15 +72,21 @@ export function LineChart({
   const points = series.map((s, i) => `${xAt(i)},${yAt(s.y)}`).join(' ');
   const areaPoints = `${padL},${padT + innerH} ${points} ${padL + innerW},${padT + innerH}`;
 
-  const gridLines = [0.25, 0.5, 0.75].map((f) => padT + innerH * f);
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => ({ y: padT + innerH * (1 - f), v: min + f * (max - min) }));
 
   const midIdx = Math.floor((n - 1) / 2);
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
-        {gridLines.map((gy, i) => (
-          <line key={i} x1={padL} x2={padL + innerW} y1={gy} y2={gy} stroke={C.borderSoft} strokeWidth={1} />
+    <div style={{ width: '100%', overflowX: 'auto' }}>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+        {/* Y-axis grid lines + labels */}
+        {gridLines.map((gl, i) => (
+          <g key={i}>
+            <line x1={padL} x2={padL + innerW} y1={gl.y} y2={gl.y} stroke={C.borderSoft} strokeWidth={1} />
+            <text x={padL - 5} y={gl.y + 3} textAnchor="end" style={{ font: `500 9px ${MONO}`, fill: C.inkGhost }}>
+              {gl.v.toFixed(0)}{yLabel ? ` ${yLabel}` : ''}
+            </text>
+          </g>
         ))}
 
         {showArea && <polygon points={areaPoints} fill={stroke} opacity={0.1} stroke="none" />}
@@ -83,24 +97,16 @@ export function LineChart({
           <polyline points={points} fill="none" stroke={stroke} strokeWidth={1.5} />
         )}
 
-        <text x={padL} y={padT - 2} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-          {max.toFixed(1)}
-          {yLabel ? ` ${yLabel}` : ''}
-        </text>
-        <text x={padL} y={padT + innerH + 9} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-          {min.toFixed(1)}
-          {yLabel ? ` ${yLabel}` : ''}
-        </text>
-
-        <text x={padL} y={H - 2} textAnchor="start" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+        {/* X-axis labels */}
+        <text x={xAt(0)} y={H - 4} textAnchor="start" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
           {series[0]?.x}
         </text>
         {n > 2 && (
-          <text x={xAt(midIdx)} y={H - 2} textAnchor="middle" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+          <text x={xAt(midIdx)} y={H - 4} textAnchor="middle" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
             {series[midIdx]?.x}
           </text>
         )}
-        <text x={padL + innerW} y={H - 2} textAnchor="end" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+        <text x={xAt(n - 1)} y={H - 4} textAnchor="end" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
           {series[n - 1]?.x}
         </text>
       </svg>
@@ -119,10 +125,10 @@ export function MultiLineChart({
 }) {
   const W = 600;
   const H = height;
-  const padL = 8;
-  const padR = 8;
-  const padT = 10;
-  const padB = 18;
+  const padL = 42;
+  const padR = 12;
+  const padT = 14;
+  const padB = 22;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
@@ -130,11 +136,9 @@ export function MultiLineChart({
 
   if (nonEmpty.length === 0) {
     return (
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-        <text x={W / 2} y={H / 2} textAnchor="middle" style={{ font: `400 11px ${FONT}`, fill: C.inkGhost }}>
-          No data
-        </text>
-      </svg>
+      <div style={{ height: H, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ font: `400 11px ${FONT}`, color: C.inkGhost }}>No data</span>
+      </div>
     );
   }
 
@@ -147,7 +151,7 @@ export function MultiLineChart({
   const xAt = (i: number) => (maxN === 1 ? padL + innerW / 2 : padL + (i / (maxN - 1)) * innerW);
   const yAt = (v: number) => padT + innerH - scaleY(v) * innerH;
 
-  const gridLines = [0.25, 0.5, 0.75].map((f) => padT + innerH * f);
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => ({ y: padT + innerH * (1 - f), v: min + f * (max - min) }));
 
   const xLabelsSource = nonEmpty.reduce((a, b) => (b.points.length > a.points.length ? b : a));
   const n = xLabelsSource.points.length;
@@ -155,18 +159,24 @@ export function MultiLineChart({
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 14, marginBottom: 6, flexWrap: 'wrap' }}>
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 14, marginBottom: 8, flexWrap: 'wrap' }}>
         {series.map((s) => (
           <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 8, height: 8, background: s.color, display: 'inline-block' }} />
+            <span style={{ width: 10, height: 2, background: s.color, display: 'inline-block' }} />
             <span style={{ font: `500 10px ${FONT}`, color: C.inkSoft }}>{s.name}</span>
           </div>
         ))}
       </div>
-      <div style={{ overflowX: 'auto' }}>
-        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
-          {gridLines.map((gy, i) => (
-            <line key={i} x1={padL} x2={padL + innerW} y1={gy} y2={gy} stroke={C.borderSoft} strokeWidth={1} />
+      <div style={{ width: '100%', overflowX: 'auto' }}>
+        <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+          {gridLines.map((gl, i) => (
+            <g key={i}>
+              <line x1={padL} x2={padL + innerW} y1={gl.y} y2={gl.y} stroke={C.borderSoft} strokeWidth={1} />
+              <text x={padL - 5} y={gl.y + 3} textAnchor="end" style={{ font: `500 9px ${MONO}`, fill: C.inkGhost }}>
+                {gl.v.toFixed(0)}
+              </text>
+            </g>
           ))}
           {nonEmpty.map((s) => {
             if (s.points.length === 1) {
@@ -175,21 +185,16 @@ export function MultiLineChart({
             const pts = s.points.map((p, i) => `${xAt(i)},${yAt(p.y)}`).join(' ');
             return <polyline key={s.name} points={pts} fill="none" stroke={s.color} strokeWidth={1.5} />;
           })}
-          <text x={padL} y={padT - 2} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-            {max.toFixed(1)}
-          </text>
-          <text x={padL} y={padT + innerH + 9} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-            {min.toFixed(1)}
-          </text>
-          <text x={padL} y={H - 2} textAnchor="start" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+          {/* X-axis labels */}
+          <text x={xAt(0)} y={H - 4} textAnchor="start" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
             {xLabelsSource.points[0]?.x}
           </text>
           {n > 2 && (
-            <text x={xAt(midIdx)} y={H - 2} textAnchor="middle" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+            <text x={xAt(midIdx)} y={H - 4} textAnchor="middle" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
               {xLabelsSource.points[midIdx]?.x}
             </text>
           )}
-          <text x={padL + innerW} y={H - 2} textAnchor="end" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+          <text x={xAt(n - 1)} y={H - 4} textAnchor="end" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
             {xLabelsSource.points[n - 1]?.x}
           </text>
         </svg>
@@ -221,35 +226,37 @@ export function BarChart({
   const scale = max === 0 ? () => 0 : (v: number) => Math.abs(v) / max;
 
   if (horizontal) {
-    const rowH = 26;
-    const H = height ?? data.length * rowH + 8;
+    const rowH = 28;
     return (
-      <div style={{ display: 'grid', gap: 4 }}>
+      <div style={{ display: 'grid', gap: 6 }}>
         {data.map((d, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, height: rowH }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, height: rowH }}>
             <div
               style={{
-                width: 110,
-                flex: '0 0 110px',
+                width: 130,
+                flex: '0 0 130px',
                 font: `500 11px ${FONT}`,
                 color: C.inkMuted,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
+              title={d.label}
             >
               {d.label}
             </div>
-            <div style={{ flex: 1, background: C.borderSoft, height: 12, position: 'relative' }}>
+            <div style={{ flex: 1, background: C.borderSoft, height: 10, position: 'relative', borderRadius: 2 }}>
               <div
                 style={{
                   width: `${scale(d.value) * 100}%`,
                   height: '100%',
                   background: d.color ?? C.accent,
+                  borderRadius: 2,
+                  transition: 'width 0.3s ease',
                 }}
               />
             </div>
-            <div style={{ width: 70, flex: '0 0 70px', textAlign: 'right', font: `500 11px ${MONO}`, color: C.ink }}>
+            <div style={{ width: 72, flex: '0 0 72px', textAlign: 'right', font: `500 11px ${MONO}`, color: C.ink }}>
               {fmt(d.value)}
             </div>
           </div>
@@ -258,37 +265,57 @@ export function BarChart({
     );
   }
 
-  const W = Math.max(data.length * 46, 200);
-  const H = height ?? 160;
-  const padB = 30;
-  const padT = 16;
+  // Vertical bar chart
+  const W = Math.max(data.length * 56, 240);
+  const H = height ?? 180;
+  const padL = 44;
+  const padR = 12;
+  const padB = 36;
+  const padT = 20;
+  const innerW = W - padL - padR;
   const innerH = H - padB - padT;
-  const barW = Math.min(28, (W / data.length) * 0.6);
+  const barW = Math.min(32, (innerW / data.length) * 0.55);
+
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => ({ y: padT + innerH * (1 - f), v: max * f }));
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+    <div style={{ width: '100%', overflowX: 'auto' }}>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+        {/* Y grid + labels */}
+        {gridLines.map((gl, i) => (
+          <g key={i}>
+            <line x1={padL} x2={padL + innerW} y1={gl.y} y2={gl.y} stroke={C.borderSoft} strokeWidth={1} />
+            <text x={padL - 5} y={gl.y + 3} textAnchor="end" style={{ font: `500 9px ${MONO}`, fill: C.inkGhost }}>
+              {fmt(gl.v)}
+            </text>
+          </g>
+        ))}
+        {/* Bars */}
         {data.map((d, i) => {
-          const cx = (i + 0.5) * (W / data.length);
+          const cx = padL + (i + 0.5) * (innerW / data.length);
           const h = scale(d.value) * innerH;
           const y = padT + innerH - h;
           return (
             <g key={i}>
-              <rect x={cx - barW / 2} y={y} width={barW} height={Math.max(h, 1)} fill={d.color ?? C.accent} />
-              <text x={cx} y={y - 4} textAnchor="middle" style={{ font: `500 10px ${MONO}`, fill: C.ink }}>
-                {fmt(d.value)}
-              </text>
+              <rect x={cx - barW / 2} y={y} width={barW} height={Math.max(h, 1)} fill={d.color ?? C.accent} rx={2} />
+              {h > 12 && (
+                <text x={cx} y={y - 5} textAnchor="middle" style={{ font: `500 10px ${MONO}`, fill: C.ink }}>
+                  {fmt(d.value)}
+                </text>
+              )}
               <text
                 x={cx}
                 y={H - 8}
                 textAnchor="middle"
                 style={{ font: `400 9px ${FONT}`, fill: C.inkGhost }}
               >
-                {d.label.length > 8 ? `${d.label.slice(0, 7)}…` : d.label}
+                {d.label.length > 9 ? `${d.label.slice(0, 8)}…` : d.label}
               </text>
             </g>
           );
         })}
+        {/* Y-axis line */}
+        <line x1={padL} x2={padL} y1={padT} y2={padT + innerH} stroke={C.border} strokeWidth={1} />
       </svg>
     </div>
   );
@@ -380,10 +407,10 @@ export function ScatterPlot({
 }) {
   const W = 600;
   const H = height;
-  const padL = 44;
+  const padL = 52;  // room for Y labels
   const padR = 24;
   const padT = 16;
-  const padB = 36;
+  const padB = yLabel ? 44 : 36;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
@@ -403,27 +430,42 @@ export function ScatterPlot({
   const xAt = (v: number) => padL + scaleX(v) * innerW;
   const yAt = (v: number) => padT + innerH - scaleY(v) * innerH;
 
+  const yGridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => ({ y: padT + innerH * (1 - f), v: yMin + f * (yMax - yMin) }));
+
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+    <div style={{ width: '100%', overflowX: 'auto' }}>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+        {/* Y axis */}
         <line x1={padL} x2={padL} y1={padT} y2={padT + innerH} stroke={C.border} strokeWidth={1} />
+        {/* X axis */}
         <line x1={padL} x2={padL + innerW} y1={padT + innerH} y2={padT + innerH} stroke={C.border} strokeWidth={1} />
 
-        <text x={padL} y={padT + innerH + 16} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+        {/* Y grid + labels */}
+        {yGridLines.map((gl, i) => (
+          <g key={i}>
+            <line x1={padL} x2={padL + innerW} y1={gl.y} y2={gl.y} stroke={C.borderSoft} strokeWidth={1} strokeDasharray="3 3" />
+            <text x={padL - 5} y={gl.y + 3} textAnchor="end" style={{ font: `500 9px ${MONO}`, fill: C.inkGhost }}>
+              {gl.v.toFixed(0)}
+            </text>
+          </g>
+        ))}
+
+        {/* X min/max labels */}
+        <text x={padL} y={padT + innerH + 14} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
           {xMin.toFixed(0)}
         </text>
-        <text x={padL + innerW} y={padT + innerH + 16} textAnchor="end" style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+        <text x={padL + innerW} y={padT + innerH + 14} textAnchor="end" style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
           {xMax.toFixed(0)}
         </text>
         {xLabel && (
-          <text x={padL + innerW / 2} y={H - 4} textAnchor="middle" style={{ font: `500 10px ${FONT}`, fill: C.inkSoft }}>
+          <text x={padL + innerW / 2} y={H - 6} textAnchor="middle" style={{ font: `500 10px ${FONT}`, fill: C.inkSoft }}>
             {xLabel}
           </text>
         )}
         {yLabel && (
           <text
             x={-(padT + innerH / 2)}
-            y={12}
+            y={14}
             textAnchor="middle"
             transform="rotate(-90)"
             style={{ font: `500 10px ${FONT}`, fill: C.inkSoft }}
@@ -432,6 +474,7 @@ export function ScatterPlot({
           </text>
         )}
 
+        {/* Points */}
         {points.map((p, i) => (
           <g key={i}>
             <circle cx={xAt(p.x)} cy={yAt(p.y)} r={5} fill={p.color ?? C.accent} />
@@ -464,30 +507,47 @@ export function Histogram({
     return <Empty2 />;
   }
 
-  const W = Math.max(buckets.length * 60, 200);
+  const W = Math.max(buckets.length * 72, 240);
   const H = height;
-  const padB = 30;
-  const padT = 16;
+  const padL = 40;
+  const padR = 12;
+  const padB = 32;
+  const padT = 20;
+  const innerW = W - padL - padR;
   const innerH = H - padB - padT;
   const max = Math.max(...buckets.map((b) => b.count), 0);
   const scale = max === 0 ? () => 0 : (v: number) => v / max;
-  const barW = Math.min(36, (W / buckets.length) * 0.6);
+  const barW = Math.min(40, (innerW / buckets.length) * 0.6);
+
+  const gridLines = [0, 0.5, 1].map((f) => ({ y: padT + innerH * (1 - f), v: Math.round(max * f) }));
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+    <div style={{ width: '100%', overflowX: 'auto' }}>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+        {/* Y grid + labels */}
+        {gridLines.map((gl, i) => (
+          <g key={i}>
+            <line x1={padL} x2={padL + innerW} y1={gl.y} y2={gl.y} stroke={C.borderSoft} strokeWidth={1} />
+            <text x={padL - 5} y={gl.y + 3} textAnchor="end" style={{ font: `500 9px ${MONO}`, fill: C.inkGhost }}>
+              {gl.v}
+            </text>
+          </g>
+        ))}
+        {/* Y axis */}
+        <line x1={padL} x2={padL} y1={padT} y2={padT + innerH} stroke={C.border} strokeWidth={1} />
+        {/* Bars */}
         {buckets.map((b, i) => {
-          const cx = (i + 0.5) * (W / buckets.length);
+          const cx = padL + (i + 0.5) * (innerW / buckets.length);
           const h = scale(b.count) * innerH;
           const y = padT + innerH - h;
           return (
             <g key={i}>
-              <rect x={cx - barW / 2} y={y} width={barW} height={Math.max(h, b.count > 0 ? 1 : 0)} fill={color ?? C.accent} />
-              <text x={cx} y={y - 4} textAnchor="middle" style={{ font: `500 10px ${MONO}`, fill: C.ink }}>
+              <rect x={cx - barW / 2} y={y} width={barW} height={Math.max(h, b.count > 0 ? 1 : 0)} fill={color ?? C.accent} rx={2} />
+              <text x={cx} y={y - 5} textAnchor="middle" style={{ font: `500 10px ${MONO}`, fill: C.ink }}>
                 {b.count}
               </text>
               <text x={cx} y={H - 8} textAnchor="middle" style={{ font: `400 9px ${FONT}`, fill: C.inkGhost }}>
-                {b.label}
+                {b.label.length > 10 ? `${b.label.slice(0, 9)}…` : b.label}
               </text>
             </g>
           );
