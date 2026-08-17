@@ -36,6 +36,7 @@ import { catalogRoutes } from './routes/catalog/index.js';
 import { ordersApproveRoutes } from './routes/orders/approve.js';
 import { ordersIncomingRoutes } from './routes/orders/incoming.js';
 import { ordersListRoutes } from './routes/orders/list.js';
+import { assistantRoutes } from './routes/assistant/query.js';
 import { complaintRoutes } from './routes/complaints/incoming.js';
 import { consumptionRoutes } from './routes/consumption/report.js';
 import { sensorRoutes } from './routes/sensors/ingest.js';
@@ -69,6 +70,7 @@ await app.register(streamRoutes, { prefix: '/api/stream' });
 await app.register(complaintRoutes, { prefix: '/api/complaints' });
 await app.register(consumptionRoutes, { prefix: '/api/consumption' });
 await app.register(shipmentRoutes, { prefix: '/api/shipments' });
+await app.register(assistantRoutes, { prefix: '/api/assistant' });
 
 // ─── Routes to implement, by phase (§9) ──────────────────────────────────────
 //
