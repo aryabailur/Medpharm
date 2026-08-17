@@ -174,9 +174,15 @@ async function institutionReliability(): Promise<Evidence> {
 
 /** M3 — network risk summary, scored via Nidana with a TS fallback. */
 async function riskSummary(): Promise<Evidence> {
-  const feeds = await prisma.consumptionFeed.findMany({
-    orderBy: { periodMonth: 'desc' },
-    take: 300,
+  // Reads StockLedger, not ConsumptionFeed. The MedTrack dataset (§10) loads
+  // 88k monthly rows into StockLedger; ConsumptionFeed only ever holds what
+  // Dhanvantari pushes up over the contract, which is a much thinner slice.
+  const since = new Date();
+  since.setMonth(since.getMonth() - 6);
+  const feeds = await prisma.stockLedger.findMany({
+    where: { month: { gte: since }, institution: { type: { not: 'WAREHOUSE' } } },
+    orderBy: { month: 'desc' },
+    take: 1200,
     include: {
       institution: { select: { id: true, name: true, district: true } },
       drug: { select: { id: true, name: true } },
@@ -193,7 +199,7 @@ async function riskSummary(): Promise<Evidence> {
       institutionId: f.institutionId,
       drugId: f.drugId,
       series: [],
-      closing: f.closing ?? 0,
+      closing: f.closingStock ?? 0,
     };
     if (f.dispensed != null) cur.series.push(f.dispensed);
     byPair.set(key, cur);
@@ -272,7 +278,12 @@ async function batchTrace(entities: Entities): Promise<Evidence> {
 
 /** M10 — consumption leaderboard. */
 async function consumptionNetwork(): Promise<Evidence> {
-  const feeds = await prisma.consumptionFeed.findMany({
+  // Last 12 months from the ledger, facilities only — warehouses would double
+  // count what they issue onward (§10).
+  const since = new Date();
+  since.setMonth(since.getMonth() - 12);
+  const feeds = await prisma.stockLedger.findMany({
+    where: { month: { gte: since }, institution: { type: { not: 'WAREHOUSE' } } },
     include: { drug: { select: { name: true } } },
   });
   const totals = new Map<string, number>();
@@ -330,8 +341,14 @@ async function diagnosisStockout(entities: Entities): Promise<Evidence> {
 
 /** M2 — per-drug demand forecast with an 80% band and plain-language drivers. */
 async function demandForecast(entities: Entities): Promise<Evidence> {
-  const feeds = await prisma.consumptionFeed.findMany({
-    orderBy: { periodMonth: 'asc' },
+  // 30 months of ledger history per pair: LightGBM needs ~18 usable rows after
+  // lag construction (longest lag is 12), so a shorter window can only ever
+  // fall back to a rolling mean.
+  const since = new Date();
+  since.setMonth(since.getMonth() - 30);
+  const feeds = await prisma.stockLedger.findMany({
+    where: { month: { gte: since }, institution: { type: { not: 'WAREHOUSE' } } },
+    orderBy: { month: 'asc' },
     include: {
       institution: { select: { id: true, name: true, district: true } },
       drug: { select: { id: true, name: true } },
@@ -355,12 +372,22 @@ async function demandForecast(entities: Entities): Promise<Evidence> {
       drugId: f.drugId,
       history: [],
     };
-    cur.history.push({ period: f.periodMonth, dispensed: f.dispensed ?? 0 });
+    cur.history.push({ period: f.month.toISOString().slice(0, 7), dispensed: f.dispensed ?? 0 });
     byPair.set(key, cur);
   }
 
+  // Forecasting all ~1500 institution/drug pairs takes seconds and nobody
+  // reads past the top of the list. Rank by recent volume and forecast the top
+  // 25 — the pairs that actually move the network. §9's gate is 6 demo
+  // questions in under 3s, and an unbounded fan-out blows it.
+  const ranked = [...byPair.values()]
+    .map((p) => ({ p, recent: p.history.slice(-3).reduce((a, h) => a + h.dispensed, 0) }))
+    .sort((a, b) => b.recent - a.recent)
+    .slice(0, 25)
+    .map((x) => x.p);
+
   const results = await Promise.all(
-    [...byPair.values()].map(async (p) => {
+    ranked.map(async (p) => {
       const f = await forecast({
         institutionId: p.institutionId,
         drugId: p.drugId,
