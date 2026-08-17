@@ -17,6 +17,8 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 
+import { registerRawBodyParser } from './lib/hmac-middleware.js';
+
 const PORT = Number(process.env.PORT ?? 4000);
 const FRONTEND_ORIGIN = process.env.VAYU_WEB_ORIGIN ?? 'http://localhost:3000';
 
@@ -25,7 +27,14 @@ const app = Fastify({ logger: true });
 // The frontend is a separate origin now. SSE and fetch both need this.
 await app.register(cors, { origin: [FRONTEND_ORIGIN], credentials: true });
 
+// Must come before any route that verifies an HMAC signature: the signature
+// covers the exact request bytes, so we keep the raw body alongside the
+// parsed JSON. See lib/hmac-middleware.ts.
+registerRawBodyParser(app);
+
 app.get('/health', async () => ({ ok: true, service: 'vayu-api' }));
+
+// --- ROUTES: append registration below, one per line, do not reorder above ---
 
 // ─── Routes to implement, by phase (§9) ──────────────────────────────────────
 //
