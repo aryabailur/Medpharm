@@ -55,7 +55,7 @@ export async function batchRoutes(app: FastifyInstance): Promise<void> {
         take,
         skip,
         include: {
-          drug: { select: { id: true, name: true, coldChain: true } },
+          drug: { select: { id: true, name: true, genericName: true, category: true, nlemCode: true, coldChain: true } },
           // The QC screen needs the latest inspection per batch. Without this
           // every batch reads as "awaiting QC", which is wrong rather than
           // merely incomplete.

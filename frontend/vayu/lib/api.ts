@@ -62,7 +62,7 @@ export interface Batch {
   quantity: number;
   qrPayload: string | null;
   status: string;
-  drug?: Pick<Drug, 'id' | 'name' | 'coldChain'>;
+  drug?: Pick<Drug, 'id' | 'name' | 'genericName' | 'category' | 'nlemCode' | 'coldChain'>;
   qcRecords?: QCRecord[];
 }
 

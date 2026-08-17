@@ -1,36 +1,33 @@
+'use client';
+
 /**
  * Batches + QC — manufactured lots, QR payloads, inspection state.
+ *
+ * Groups batches by drug (mirrors outer Dhanvantari catalog pattern).
+ * Click a drug row to expand and see per-batch detail + print buttons.
  */
 
+import { useState, useEffect } from 'react';
 import { getBatches, type Batch } from '../../lib/api';
-import { C, FONT, MONO } from '../../lib/theme';
-import { ApiError, Card, Empty, Kpi, KpiBand, Mono, PageHeader, Pill, Table, Td } from '../../components/ui';
-
-export const dynamic = 'force-dynamic';
+import { C, FONT } from '../../lib/theme';
+import { Search } from 'lucide-react';
+import { ApiError, Card, Kpi, KpiBand, PageHeader } from '../../components/ui';
+import BatchCatalog from '../../components/BatchCatalog';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export default async function Batches() {
-  let batches: Batch[] = [];
-  let error: string | null = null;
+export default function Batches() {
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
 
-  try {
-    const res = await getBatches('?take=100');
-    batches = res.items;
-  } catch (e) {
-    error = (e as Error).message;
-  }
-
-  if (error) {
-    return (
-      <>
-        <PageHeader title="Batches + QC" />
-        <div style={{ padding: 26 }}>
-          <ApiError error={error} />
-        </div>
-      </>
-    );
-  }
+  useEffect(() => {
+    getBatches('?take=200')
+      .then((res) => setBatches(res.items))
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
 
   const now = Date.now();
   const qcApproved = batches.filter((b) => b.status === 'QC_APPROVED');
@@ -45,63 +42,70 @@ export default async function Batches() {
       <PageHeader title="Batches + QC" />
 
       <KpiBand columns={4}>
-        <Kpi label="Total batches" value={batches.length} />
-        <Kpi label="QC approved" value={qcApproved.length} deltaColor={C.green} />
+        <Kpi label="Total batches" value={loading ? '…' : batches.length} />
+        <Kpi label="QC approved" value={loading ? '…' : qcApproved.length} deltaColor={C.green} />
         <Kpi
           label="Expiring ≤90d"
-          value={expiringSoon.length}
+          value={loading ? '…' : expiringSoon.length}
           deltaColor={expiringSoon.length ? C.amber : C.grey}
         />
-        <Kpi label="Cold chain" value={coldChain.length} deltaColor={C.accent} />
+        <Kpi label="Cold chain" value={loading ? '…' : coldChain.length} deltaColor={C.accent} />
       </KpiBand>
 
       <div style={{ padding: 26, display: 'grid', gap: 18 }}>
-        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-          {batches.length === 0 ? (
-            <Empty>No batches on record.</Empty>
-          ) : (
-            <Table head={['Lot', 'Drug', 'Qty', 'Mfg', 'Expiry', 'QC', 'Status', 'QR']}>
-              {batches.map((b) => {
-                const expiryTime = new Date(b.expiryDate).getTime();
-                const daysToExpiry = (expiryTime - now) / DAY_MS;
-                const expiryColor =
-                  daysToExpiry < 0 ? C.red : daysToExpiry <= 90 ? C.amber : C.inkMuted;
-                const latestQc = b.qcRecords && b.qcRecords.length > 0 ? b.qcRecords[0] : null;
-                const qr = b.qrPayload ? (b.qrPayload.length > 18 ? `${b.qrPayload.slice(0, 18)}…` : b.qrPayload) : '—';
+        {error ? (
+          <ApiError error={error} />
+        ) : (
+          <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
+            {/* search bar */}
+            <div style={{
+              padding: '14px 16px',
+              borderBottom: `1px solid ${C.borderSoft}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+            }}>
+              <Search size={14} style={{ color: C.inkGhost, flexShrink: 0 }} />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search drug name, lot number, or QR payload…"
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  outline: 'none',
+                  font: `400 13px/1 ${FONT}`,
+                  color: C.ink,
+                  background: 'transparent',
+                }}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  style={{
+                    font: `400 11px/1 ${FONT}`,
+                    color: C.inkGhost,
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '2px 6px',
+                  }}
+                >
+                  ✕ Clear
+                </button>
+              )}
+            </div>
 
-                return (
-                  <tr key={b.id}>
-                    <Td>
-                      <Mono>{b.lotNumber}</Mono>
-                    </Td>
-                    <Td>
-                      {b.drug?.name ?? '—'}
-                      {b.drug?.coldChain && (
-                        <div style={{ font: `600 10px/1.4 ${FONT}`, color: C.accent, marginTop: 2 }}>
-                          cold chain
-                        </div>
-                      )}
-                    </Td>
-                    <Td>
-                      <Mono>{b.quantity.toLocaleString('en-IN')}</Mono>
-                    </Td>
-                    <Td>{new Date(b.mfgDate).toLocaleDateString('en-GB')}</Td>
-                    <Td style={{ color: expiryColor, fontWeight: daysToExpiry <= 90 ? 600 : 400 }}>
-                      {new Date(b.expiryDate).toLocaleDateString('en-GB')}
-                    </Td>
-                    <Td>{latestQc ? <Pill label={latestQc.result} /> : <Pill label="AWAITING" />}</Td>
-                    <Td>
-                      <Pill label={b.status} />
-                    </Td>
-                    <Td>
-                      <Mono color={C.inkGhost}>{qr}</Mono>
-                    </Td>
-                  </tr>
-                );
-              })}
-            </Table>
-          )}
-        </Card>
+            {loading ? (
+              <div style={{ padding: 40, textAlign: 'center', font: `400 13px/1.5 ${FONT}`, color: C.inkGhost }}>
+                Loading batches…
+              </div>
+            ) : (
+              <BatchCatalog batches={batches} searchQuery={search} />
+            )}
+          </Card>
+        )}
       </div>
     </>
   );
