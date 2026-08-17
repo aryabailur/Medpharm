@@ -176,7 +176,7 @@ export default function AnalyticsPage() {
         <Kpi label="Districts" value={summary ? summary.districts : '—'} />
       </KpiBand>
 
-      <div style={{ padding: 26, display: 'grid', gap: 28 }}>
+      <div style={{ padding: 26, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 28 }}>
         {/* 2. Consumption & seasonality */}
         <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
           <CardTitle
@@ -237,7 +237,7 @@ export default function AnalyticsPage() {
         </Card>
 
         {/* 3. Supplier reliability vs price */}
-        <Card>
+        <Card style={{ gridColumn: '1 / -1' }}>
           <CardTitle>Supplier Reliability vs Price</CardTitle>
           <div style={{ padding: 16 }}>
             {vendors.length === 0 ? (
@@ -307,7 +307,7 @@ export default function AnalyticsPage() {
         </Card>
 
         {/* 5. Stock health */}
-        <Card>
+        <Card style={{ gridColumn: '1 / -1' }}>
           <CardTitle>Stock Health</CardTitle>
           <div style={{ padding: 16 }}>
             {!stockHealth || stockHealth.buckets.length === 0 ? (
