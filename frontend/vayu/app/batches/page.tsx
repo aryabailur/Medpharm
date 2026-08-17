@@ -9,9 +9,9 @@
 
 import { useState, useEffect } from 'react';
 import { getBatches, type Batch } from '../../lib/api';
-import { C, FONT } from '../../lib/theme';
+import { C, FONT, MONO, rise, stagger } from '../../lib/theme';
 import { Search } from 'lucide-react';
-import { ApiError, Card, Kpi, KpiBand, PageHeader } from '../../components/ui';
+import { ApiError, Card, PageHeader } from '../../components/ui';
 import BatchCatalog from '../../components/BatchCatalog';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -41,22 +41,94 @@ export default function Batches() {
     <>
       <PageHeader title="Batches + QC" />
 
-      <KpiBand columns={4}>
-        <Kpi label="Total batches" value={loading ? '…' : batches.length} />
-        <Kpi label="QC approved" value={loading ? '…' : qcApproved.length} deltaColor={C.green} />
-        <Kpi
-          label="Expiring ≤90d"
-          value={loading ? '…' : expiringSoon.length}
-          deltaColor={expiringSoon.length ? C.amber : C.grey}
-        />
-        <Kpi label="Cold chain" value={loading ? '…' : coldChain.length} deltaColor={C.accent} />
-      </KpiBand>
+      {/* The handoff's secondary KPI strip: 32px figures, colour carrying the
+          reading, flush to the page edges rather than sitting in cards. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        {[
+          { label: 'Total batches', value: batches.length, color: C.ink, note: 'Manufactured lots on record' },
+          { label: 'QC approved', value: qcApproved.length, color: C.green, note: 'Cleared for allocation' },
+          {
+            label: 'Expiring ≤ 90 d',
+            value: expiringSoon.length,
+            color: expiringSoon.length ? C.amber : C.grey,
+            note: 'Dispatch these first',
+          },
+          { label: 'Cold chain', value: coldChain.length, color: C.blue, note: 'Held at 2–8 °C' },
+        ].map((k, i) => (
+          <div
+            key={k.label}
+            style={{
+              padding: '24px 26px',
+              borderRight: i === 3 ? 'none' : `1px solid ${C.borderFaint}`,
+              animation: stagger(i),
+            }}
+          >
+            <div
+              style={{
+                font: `600 11px/1 ${FONT}`,
+                letterSpacing: '.17em',
+                textTransform: 'uppercase',
+                color: C.inkFaint,
+              }}
+            >
+              {k.label}
+            </div>
+            <div
+              style={{
+                font: `600 32px/1 ${MONO}`,
+                letterSpacing: '-.03em',
+                fontVariantNumeric: 'tabular-nums',
+                color: k.color,
+                marginTop: 12,
+              }}
+            >
+              {loading ? '…' : k.value}
+            </div>
+            <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>{k.note}</div>
+          </div>
+        ))}
+      </div>
 
-      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
+      <div style={{ padding: '26px 26px 52px', display: 'grid', gap: 24 }}>
         {error ? (
           <ApiError error={error} />
         ) : (
-          <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
+          <Card style={{ animation: rise(0) }}>
+            {/* Card header strip, then the search row beneath it — the handoff
+                always labels a card before its controls. */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 13,
+                padding: '17px 18px',
+                borderBottom: `1px solid ${C.border}`,
+                background: C.surfaceAlt,
+              }}
+            >
+              <span
+                style={{
+                  font: `600 11px/1 ${FONT}`,
+                  letterSpacing: '.17em',
+                  textTransform: 'uppercase',
+                  color: C.inkFaint,
+                }}
+              >
+                Batches · {loading ? '…' : batches.length} lots
+              </span>
+              <div style={{ flex: 1 }} />
+              <span style={{ font: `500 11px/1 ${MONO}`, color: C.inkFaint }}>
+                grouped by drug · click to expand
+              </span>
+            </div>
+
             {/* search bar */}
             <div style={{
               padding: '14px 16px',

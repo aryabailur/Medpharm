@@ -301,12 +301,10 @@ export function ApiError({ error, service = 'dhanvantari-api' }: { error: string
   );
 }
 
-/** Thin labelled progress rail. */
-export function Meter({ pct, color }: { pct: number; color?: string }) {
-  const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
-  return (
-    <div style={{ width: 90, height: 4, background: C.borderSoft, borderRadius: 2, overflow: 'hidden' }}>
-      <div style={{ width: `${clamped}%`, height: '100%', background: color ?? C.accent }} />
-    </div>
-  );
-}
+/**
+ * Thin progress rail.
+ *
+ * Re-exported from charts.tsx so a table cell and a chart axis can never drift
+ * apart — there is one meter in the product, not two.
+ */
+export { Meter } from './charts';

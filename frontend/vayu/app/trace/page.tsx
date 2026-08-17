@@ -6,9 +6,20 @@
 
 import { useState } from 'react';
 
-import { getBatch, resolveQr, type Batch, type Drug } from '../../lib/api';
-import { C, FONT, MONO } from '../../lib/theme';
-import { Button, Card, Empty, PageHeader, Pill } from '../../components/ui';
+import {
+  getBatch,
+  getShipment,
+  getTelemetry,
+  resolveQr,
+  type Batch,
+  type Drug,
+  type Excursion,
+  type Shipment,
+  type TelemetryPoint,
+} from '../../lib/api';
+import { C, FONT, MONO, rise } from '../../lib/theme';
+import { Card, CardTitle, Empty } from '../../components/ui';
+import { AxisStrip, RouteMap, TemperatureChart } from '../../components/charts';
 
 type ShipmentBatchEntry = {
   shipmentId: string;
@@ -18,13 +29,32 @@ type ShipmentBatchEntry = {
 /** getBatch's full response nests the whole Drug row, not the narrow list-view pick. */
 type FullBatch = Omit<Batch, 'drug'> & { drug?: Drug; shipmentBatch?: ShipmentBatchEntry[] };
 
+function fmtDT(ts: string | null): string {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtClock(ts: string | null): string {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+interface Stage {
+  idx: string;
+  label: string;
+  meta: string;
+  state: 'done' | 'warn' | 'bad' | 'pending';
+}
+
 export default function Trace() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState<string | null>(null);
   const [batch, setBatch] = useState<FullBatch | null>(null);
-  // qcRecords arrives newest-first from the API; the timeline reads oldest-first.
+  const [shipment, setShipment] = useState<Shipment | null>(null);
+  const [excursions, setExcursions] = useState<Excursion[]>([]);
+  const [points, setPoints] = useState<TelemetryPoint[]>([]);
 
   const handleTrace = async () => {
     const value = query.trim();
@@ -33,10 +63,26 @@ export default function Trace() {
     setError(null);
     setNotFound(null);
     setBatch(null);
+    setShipment(null);
+    setExcursions([]);
+    setPoints([]);
     try {
       const resolved = await resolveQr(value);
       const full = await getBatch(resolved.batchId);
       setBatch(full as FullBatch);
+
+      const entries: ShipmentBatchEntry[] = (full as FullBatch).shipmentBatch ?? [];
+      const latest = entries[entries.length - 1];
+      if (latest) {
+        try {
+          const [ship, tel] = await Promise.all([getShipment(latest.shipmentId), getTelemetry(latest.shipmentId)]);
+          setShipment(ship);
+          setExcursions(ship.excursions);
+          setPoints(tel.points);
+        } catch {
+          /* shipment detail is optional context */
+        }
+      }
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.includes('404')) {
@@ -51,154 +97,324 @@ export default function Trace() {
 
   const shipmentEntries: ShipmentBatchEntry[] = batch?.shipmentBatch ?? [];
   const qcChronological = [...(batch?.qcRecords ?? [])].reverse();
+  const openExcursion = excursions.find((e) => !e.endedAt) ?? excursions[0] ?? null;
+
+  // Stage rail: manufacture -> QC -> shipments -> (excursion) -> current.
+  const stages: Stage[] = batch
+    ? [
+        { idx: '01', label: 'Manufactured', meta: fmtDT(batch.mfgDate), state: 'done' as const },
+        ...qcChronological.map((qc) => ({
+          idx: '02',
+          label: qc.result === 'FAIL' ? 'QC failed' : 'QC passed',
+          meta: fmtDT(qc.testedAt),
+          state: (qc.result === 'FAIL' ? 'bad' : 'done') as Stage['state'],
+        })),
+        ...shipmentEntries.map((entry) => ({
+          idx: '03',
+          label: `Shipment ${entry.shipment.status.replace(/_/g, ' ')}`,
+          meta: entry.shipment.deliveredAt
+            ? `delivered ${fmtDT(entry.shipment.deliveredAt)}`
+            : entry.shipment.dispatchedAt
+              ? `dispatched ${fmtDT(entry.shipment.dispatchedAt)}`
+              : entry.shipmentId.slice(0, 8).toUpperCase(),
+          state: (entry.shipment.status === 'RECALLED' ? 'bad' : 'done') as Stage['state'],
+        })),
+        ...(openExcursion
+          ? [
+              {
+                idx: '04',
+                label: `Excursion · ${openExcursion.severity}`,
+                meta: `${fmtClock(openExcursion.startedAt)}${openExcursion.endedAt ? `–${fmtClock(openExcursion.endedAt)}` : ' open'}`,
+                state: (openExcursion.severity === 'CRITICAL' ? 'bad' : 'warn') as Stage['state'],
+              },
+            ]
+          : []),
+      ]
+    : [];
+
+  const stageColor = (s: Stage['state']) => (s === 'bad' ? C.red : s === 'warn' ? C.amber : C.ink);
+
+  // Temperature at the breach, from the linked shipment's telemetry.
+  const tempPoints = points.filter((p) => p.tempC != null) as Array<TelemetryPoint & { tempC: number }>;
+  const seriesStart = tempPoints.length ? new Date(tempPoints[0].ts).getTime() : 0;
+  const seriesEnd = tempPoints.length ? new Date(tempPoints[tempPoints.length - 1].ts).getTime() : 0;
+  const seriesSpan = seriesEnd - seriesStart || 1;
+  const bands = excursions.map((e) => {
+    const from = (new Date(e.startedAt).getTime() - seriesStart) / seriesSpan;
+    const to = ((e.endedAt ? new Date(e.endedAt).getTime() : seriesEnd) - seriesStart) / seriesSpan;
+    return { from: Math.max(0, Math.min(1, from)), to: Math.max(0, Math.min(1, to)) };
+  });
+  const breachTicks = tempPoints.length
+    ? [tempPoints[0]!.ts, ...(openExcursion ? [openExcursion.startedAt] : []), tempPoints[tempPoints.length - 1]!.ts].map(fmtClock)
+    : [];
+
+  const traceMeta = batch
+    ? [
+        { k: 'Batch', v: batch.id.slice(0, 8).toUpperCase() },
+        { k: 'Lot', v: batch.lotNumber },
+        { k: 'Quantity', v: `${batch.quantity.toLocaleString('en-IN')} units` },
+        { k: 'Destination', v: shipment?.supplyOrder?.institution?.name ?? '—' },
+        { k: 'Status', v: batch.status.replace(/_/g, ' ') },
+      ]
+    : [];
 
   return (
     <>
-      <PageHeader title="Supply-chain Trace" />
-
-      <div style={{ padding: 26, display: 'grid', gap: 18, maxWidth: 720 }}>
-        <div style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleTrace();
-              }}
-              placeholder="QR payload or lot number"
-              style={{
-                flex: 1,
-                border: `1px solid ${C.border}`,
-                borderRadius: 4,
-                padding: '7px 10px',
-                font: `400 13px/1.4 ${FONT}`,
-                color: C.ink,
-                background: C.surface,
-              }}
-            />
-            <Button variant="primary" onClick={handleTrace} disabled={loading || !query.trim()}>
-              Trace
-            </Button>
+      {batch && (
+        <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: '22px 26px' }}>
+          <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
+            Supply chain · {batch.lotNumber}
           </div>
-          <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost, marginTop: 6 }}>
-            Scan or type a QR payload, or enter a lot number.
+          <div style={{ display: 'flex', alignItems: 'stretch', gap: 0, marginTop: 14, overflowX: 'auto' }}>
+            {stages.map((s, i) => (
+              <div
+                key={i}
+                style={{ flex: 1, minWidth: 104, borderTop: `2px solid ${stageColor(s.state)}`, padding: '11px 12px 0' }}
+              >
+                <div style={{ font: `500 9px/1 ${MONO}`, letterSpacing: '.1em', color: C.inkSoft }}>{s.idx}</div>
+                <div
+                  style={{
+                    font: `600 11px/1.3 ${FONT}`,
+                    letterSpacing: '.04em',
+                    textTransform: 'uppercase',
+                    color: stageColor(s.state),
+                    marginTop: 7,
+                  }}
+                >
+                  {s.label}
+                </div>
+                <div style={{ font: `400 10px/1.4 ${MONO}`, color: C.inkFaint, marginTop: 5 }}>{s.meta}</div>
+              </div>
+            ))}
           </div>
         </div>
+      )}
 
-        {error && (
-          <Card style={{ padding: 16, borderColor: '#E4C7C4', background: C.redTint }}>
-            <div style={{ font: `600 12px/1.4 ${FONT}`, color: C.red }}>Cannot reach vayu-api</div>
-            <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkMuted, marginTop: 5 }}>{error}</div>
-          </Card>
-        )}
+      <div style={{ padding: batch ? '26px 26px 52px' : 26 }}>
+        {!batch && (
+          <div style={{ display: 'grid', gap: 18, maxWidth: 720, animation: rise(0) }}>
+            <div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleTrace();
+                  }}
+                  placeholder="QR payload or lot number"
+                  style={{
+                    flex: 1,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 4,
+                    padding: '7px 10px',
+                    font: `400 13px/1.4 ${FONT}`,
+                    color: C.ink,
+                    background: C.surface,
+                  }}
+                />
+                <button
+                  onClick={handleTrace}
+                  disabled={loading || !query.trim()}
+                  style={{
+                    border: 0,
+                    background: C.ink,
+                    color: C.bg,
+                    font: `500 12px/1 ${FONT}`,
+                    padding: '8px 13px',
+                    borderRadius: 4,
+                    cursor: loading || !query.trim() ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Trace
+                </button>
+              </div>
+              <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost, marginTop: 6 }}>
+                Scan or type a QR payload, or enter a lot number.
+              </div>
+            </div>
 
-        {notFound && (
-          <Card>
-            <Empty>No batch matching &quot;{notFound}&quot;.</Empty>
-          </Card>
+            {error && (
+              <Card style={{ padding: 16, borderColor: '#E4C7C4', background: C.redTint }}>
+                <div style={{ font: `600 12px/1.4 ${FONT}`, color: C.red }}>Cannot reach vayu-api</div>
+                <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkMuted, marginTop: 5 }}>{error}</div>
+              </Card>
+            )}
+
+            {notFound && (
+              <Card>
+                <Empty>No batch matching &quot;{notFound}&quot;.</Empty>
+              </Card>
+            )}
+
+            {!error && !notFound && <Empty>Trace a batch to see its custody chain.</Empty>}
+          </div>
         )}
 
         {batch && (
-          <>
-            <Card style={{ padding: '14px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ font: `600 14px/1.3 ${MONO}`, color: C.ink }}>{batch.lotNumber}</div>
-                <Pill label={batch.status} />
-              </div>
-              <div style={{ font: `400 13px/1.6 ${FONT}`, color: C.inkMuted, marginTop: 6 }}>
-                {batch.drug?.name ?? 'Unknown drug'}
-              </div>
-              <div style={{ display: 'flex', gap: 18, marginTop: 10, flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ font: `600 10px/1 ${FONT}`, letterSpacing: '.14em', textTransform: 'uppercase', color: C.inkGhost }}>
-                    Quantity
-                  </div>
-                  <div style={{ font: `500 13px/1.6 ${MONO}`, color: C.ink }}>
-                    {batch.quantity.toLocaleString('en-IN')}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ font: `600 10px/1 ${FONT}`, letterSpacing: '.14em', textTransform: 'uppercase', color: C.inkGhost }}>
-                    Expiry
-                  </div>
-                  <div style={{ font: `500 13px/1.6 ${MONO}`, color: C.ink }}>
-                    {new Date(batch.expiryDate).toLocaleDateString('en-GB')}
-                  </div>
-                </div>
-                {batch.drug?.coldChain && (
-                  <div>
-                    <div style={{ font: `600 10px/1 ${FONT}`, letterSpacing: '.14em', textTransform: 'uppercase', color: C.inkGhost }}>
-                      Cold-chain band
-                    </div>
-                    <div style={{ font: `500 13px/1.6 ${MONO}`, color: C.accent }}>
-                      {batch.drug?.minTempC}–{batch.drug?.maxTempC} °C
-                    </div>
-                  </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,0.95fr)', gap: 24 }}>
+            <Card style={{ animation: rise(0) }}>
+              <CardTitle
+                right={
+                  <button
+                    onClick={() => {
+                      setBatch(null);
+                      setQuery('');
+                    }}
+                    style={{
+                      border: `1px solid ${C.border}`,
+                      background: C.surface,
+                      font: `500 12px/1 ${FONT}`,
+                      color: C.ink,
+                      padding: '6px 10px',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Export bundle
+                  </button>
+                }
+              >
+                Event spine
+              </CardTitle>
+              <div style={{ padding: '16px 14px 4px' }}>
+                <EventStep color={C.ink} label="Manufactured" time={fmtDT(batch.mfgDate)} detail={`Lot ${batch.lotNumber}, ${batch.quantity.toLocaleString('en-IN')} units.`} />
+                {qcChronological.map((qc, i) => (
+                  <EventStep
+                    key={qc.id}
+                    color={qc.result === 'FAIL' ? C.red : C.ink}
+                    label={`QC ${qc.result}`}
+                    time={fmtDT(qc.testedAt)}
+                    detail={`${qc.inspector ?? 'Unknown inspector'}. ${qc.notes ?? ''}`}
+                    isLast={i === qcChronological.length - 1 && shipmentEntries.length === 0 && !openExcursion}
+                  />
+                ))}
+                {shipmentEntries.map((entry, i) => (
+                  <EventStep
+                    key={entry.shipmentId}
+                    color={entry.shipment.status === 'RECALLED' ? C.red : C.ink}
+                    label={`Shipment ${entry.shipment.status.replace(/_/g, ' ')}`}
+                    time={entry.shipment.deliveredAt ? fmtDT(entry.shipment.deliveredAt) : fmtDT(entry.shipment.dispatchedAt)}
+                    detail={entry.shipmentId.slice(0, 8).toUpperCase()}
+                    isLast={i === shipmentEntries.length - 1 && !openExcursion}
+                  />
+                ))}
+                {openExcursion && (
+                  <EventStep
+                    color={C.amber}
+                    label={`Excursion · ${openExcursion.severity}`}
+                    time={fmtDT(openExcursion.startedAt)}
+                    detail={`Peak ${openExcursion.maxTempC?.toFixed(1) ?? '—'} °C${
+                      openExcursion.durationMin != null ? `, ${openExcursion.durationMin} min above band` : ''
+                    }.`}
+                    isLast
+                  />
                 )}
               </div>
             </Card>
 
-            <Card style={{ padding: '16px 18px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                <TimelineStep
-                  color={C.ink}
-                  title="Manufactured"
-                  meta={new Date(batch.mfgDate).toLocaleDateString('en-GB')}
-                  isLast={!(qcChronological.length || shipmentEntries.length)}
-                />
-                {qcChronological.map((qc, i) => (
-                  <TimelineStep
-                    key={qc.id}
-                    color={qc.result === 'FAIL' ? C.red : C.ink}
-                    title={`QC ${qc.result}`}
-                    meta={`${qc.inspector ?? 'Unknown inspector'} · ${new Date(qc.testedAt).toLocaleString('en-GB')}`}
-                    isLast={i === qcChronological.length - 1 && shipmentEntries.length === 0}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {shipment && (
+                <Card style={{ overflow: 'hidden', animation: rise(60) }}>
+                  <CardTitle right={<span style={{ font: `400 11px/1 ${MONO}`, color: C.inkSoft }}>
+                    {Math.round((shipment.progressPct ?? 0) * 100)}% · ETA {fmtClock(shipment.etaAt)}
+                  </span>}>
+                    Route · {shipment.id.slice(0, 8).toUpperCase()}
+                  </CardTitle>
+                  <RouteMap
+                    progress={shipment.progressPct ?? 0}
+                    origin="ORIGIN"
+                    destination={(shipment.supplyOrder?.institution?.name ?? 'DESTINATION').toUpperCase()}
+                    now={`NOW · ${Math.round((shipment.progressPct ?? 0) * 100)}%`}
+                    incident={openExcursion ? `EXCURSION ${fmtClock(openExcursion.startedAt)}` : undefined}
+                    height={220}
                   />
-                ))}
-                {shipmentEntries.map((entry, i) => (
-                  <TimelineStep
-                    key={entry.shipmentId}
-                    color={C.ink}
-                    title={`Shipment ${entry.shipment.status}`}
-                    meta={
-                      entry.shipment.deliveredAt
-                        ? `delivered ${new Date(entry.shipment.deliveredAt).toLocaleString('en-GB')}`
-                        : entry.shipment.dispatchedAt
-                          ? `dispatched ${new Date(entry.shipment.dispatchedAt).toLocaleString('en-GB')}`
-                          : entry.shipmentId
-                    }
-                    isLast={i === shipmentEntries.length - 1}
-                  />
-                ))}
-              </div>
-            </Card>
-          </>
+                </Card>
+              )}
+
+              <Card style={{ animation: rise(100) }}>
+                <CardTitle>Temperature at the breach</CardTitle>
+                <div style={{ padding: '18px 20px' }}>
+                  {tempPoints.length === 0 ? (
+                    <Empty>No temperature telemetry linked to this batch.</Empty>
+                  ) : (
+                    <>
+                      <TemperatureChart readings={tempPoints.map((p) => ({ ts: p.ts, tempC: p.tempC }))} bands={bands} height={150} />
+                      <AxisStrip labels={breachTicks} />
+                    </>
+                  )}
+                </div>
+              </Card>
+
+              <Card style={{ animation: rise(140) }}>
+                <CardTitle>Where it went</CardTitle>
+                <div style={{ padding: '6px 14px 14px' }}>
+                  {traceMeta.map((m) => (
+                    <div
+                      key={m.k}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        padding: '9px 0',
+                        borderBottom: `1px solid ${C.borderSoft}`,
+                        font: `400 12px/1.4 ${FONT}`,
+                      }}
+                    >
+                      <span style={{ color: C.inkFaint }}>{m.k}</span>
+                      <span style={{ fontWeight: 500, textAlign: 'right', color: C.ink }}>{m.v}</span>
+                    </div>
+                  ))}
+                  <div
+                    style={{
+                      font: `600 11px/1 ${FONT}`,
+                      letterSpacing: '.17em',
+                      textTransform: 'uppercase',
+                      color: C.inkFaint,
+                      marginTop: 14,
+                    }}
+                  >
+                    Same-vehicle exposure
+                  </div>
+                  <div style={{ font: `400 14px/1.8 ${FONT}`, color: C.inkMuted, marginTop: 8 }}>
+                    {shipmentEntries.length > 1
+                      ? `This batch rode ${shipmentEntries.length} shipments end to end.`
+                      : 'No other shipments recorded for this batch.'}
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
         )}
       </div>
     </>
   );
 }
 
-function TimelineStep({
+function EventStep({
   color,
-  title,
-  meta,
+  label,
+  time,
+  detail,
   isLast,
 }: {
   color: string;
-  title: string;
-  meta: string;
+  label: string;
+  time: string;
+  detail: string;
   isLast?: boolean;
 }) {
   return (
-    <div style={{ display: 'flex', gap: 12 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 9 }}>
-        <div style={{ width: 9, height: 9, background: color, flexShrink: 0 }} />
-        {!isLast && <div style={{ width: 1, flex: 1, background: C.border, minHeight: 24 }} />}
+    <div style={{ display: 'flex', gap: 14 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 10 }}>
+        <span style={{ width: 10, height: 10, background: color, display: 'inline-block' }} />
+        {!isLast && <span style={{ width: 1, flex: 1, background: C.border, minHeight: 24 }} />}
       </div>
-      <div style={{ paddingBottom: 18 }}>
-        <div style={{ font: `600 12px/1.4 ${FONT}`, color: C.ink }}>{title}</div>
-        <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost, marginTop: 2 }}>{meta}</div>
+      <div style={{ paddingBottom: 20, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 11 }}>
+          <span style={{ font: `600 15px/1.4 ${FONT}`, color }}>{label}</span>
+          <span style={{ font: `400 11px/1 ${MONO}`, color: C.inkFaint }}>{time}</span>
+        </div>
+        <div style={{ font: `400 14px/1.8 ${FONT}`, color: C.inkMuted, marginTop: 5, maxWidth: 620 }}>{detail}</div>
       </div>
     </div>
   );

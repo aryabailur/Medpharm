@@ -4,18 +4,26 @@
  * Inventory — full line-item list for this store, filterable client-side.
  */
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { getInventory, type InventoryRow } from '../../lib/api';
-import { C, FONT, rupees, num } from '../../lib/theme';
-import { ApiError, Card, Empty, Kpi, KpiBand, Meter, Mono, PageHeader, Segmented, Table, Td } from '../../components/ui';
+import { C, FONT, MONO, num, rise, statusColors } from '../../lib/theme';
+import { ApiError, Card, CardTitle, Empty, Meter, PageHeader, Pill } from '../../components/ui';
 
-const FILTERS = [
+const FILTERS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All' },
-  { value: 'low', label: 'Low stock' },
   { value: 'cold', label: 'Cold chain' },
+  { value: 'low', label: 'Low stock' },
   { value: 'expiry', label: 'Near expiry' },
 ];
+
+function stateOf(r: InventoryRow): string {
+  if (r.qtyOnHand === 0) return 'CRITICAL';
+  if (r.daysToExpiry != null && r.daysToExpiry <= 90) return 'EXPIRING';
+  if (r.lowStock) return 'LOW';
+  return 'OK';
+}
 
 export default function Inventory() {
   const [filter, setFilter] = useState('');
@@ -47,74 +55,190 @@ export default function Inventory() {
     }
   }, [items, filter]);
 
-  const belowReorder = items.filter((r) => r.lowStock).length;
-  const coldChain = items.filter((r) => r.drug.coldChain).length;
-  const stockValue = items.reduce((sum, r) => sum + r.qtyOnHand * (r.drug.unitPrice ?? 0), 0);
-
   return (
     <>
-      <PageHeader title="Inventory" right={<Segmented options={FILTERS} value={filter} onChange={setFilter} />} />
+      <PageHeader title="Inventory" />
 
-      <KpiBand columns={4}>
-        <Kpi label="Line items" value={items.length} />
-        <Kpi label="Below reorder" value={belowReorder} deltaColor={C.amber} />
-        <Kpi label="Cold chain" value={coldChain} deltaColor={C.accent} />
-        <Kpi label="Stock value" value={rupees(stockValue)} />
-      </KpiBand>
-
-      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
+      <div style={{ padding: '26px 26px 52px' }}>
         {error && <ApiError error={error} />}
 
-        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
+        <Card style={{ animation: rise(0), overflow: 'hidden' }}>
+          <CardTitle
+            right={
+              <div style={{ display: 'flex', gap: 8 }}>
+                {FILTERS.map((f) => {
+                  const active = f.value === filter;
+                  return (
+                    <button
+                      key={f.value || 'all'}
+                      onClick={() => setFilter(f.value)}
+                      style={{
+                        border: active ? `1px solid ${C.inkStrong}` : '1px solid #E4E2DF',
+                        background: active ? C.inkStrong : '#fff',
+                        color: active ? '#fff' : '#4A4542',
+                        font: `500 11px/1 ${FONT}`,
+                        padding: '6px 10px',
+                        borderRadius: 3,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
+            }
+          >
+            Inventory · {items.length} line items
+          </CardTitle>
+
           {filtered.length === 0 ? (
             <Empty>No inventory lines match this filter.</Empty>
           ) : (
-            <Table head={['Drug', 'Location', 'On hand', 'Reorder', 'Cover', 'Expiry']}>
-              {filtered.map((r) => {
-                const pct = r.reorderPoint > 0 ? (r.qtyOnHand / r.reorderPoint) * 100 : 0;
-                const coverColor = pct < 50 ? C.red : pct < 100 ? C.amber : C.green;
-                const past = r.daysToExpiry != null && r.daysToExpiry <= 0;
-                const soon = r.daysToExpiry != null && r.daysToExpiry <= 90;
-                const expiryColor = past ? C.red : soon ? C.amber : C.inkMuted;
-                return (
-                  <tr key={r.id}>
-                    <Td>
-                      <div style={{ font: `500 13px/1.3 ${FONT}`, color: C.ink }}>{r.drug.name}</div>
-                      <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost, marginTop: 2 }}>
-                        {r.drug.nlemCode ?? ''} · {r.drug.packSize ?? ''}
-                      </div>
-                    </Td>
-                    <Td>{r.location ?? '—'}</Td>
-                    <Td>
-                      <Mono>{num(r.qtyOnHand)}</Mono>
-                    </Td>
-                    <Td>
-                      <Mono>{num(r.reorderPoint)}</Mono>
-                    </Td>
-                    <Td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Meter pct={pct} color={coverColor} />
-                        <Mono color={coverColor}>{Math.round(pct)}%</Mono>
-                      </div>
-                    </Td>
-                    <Td style={{ color: expiryColor }}>
-                      {r.expiryDate ? (
-                        <>
-                          {new Date(r.expiryDate).toLocaleDateString('en-GB')}
-                          {r.daysToExpiry != null && (
-                            <span style={{ marginLeft: 6 }}>
-                              <Mono color={expiryColor}>{r.daysToExpiry}d</Mono>
-                            </span>
-                          )}
-                        </>
-                      ) : (
-                        '—'
-                      )}
-                    </Td>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
+                <thead>
+                  <tr>
+                    {['Drug', 'Batch ref', 'On hand', 'Reorder pt', 'Expiry', 'Location', 'State'].map((h, i) => (
+                      <th
+                        key={h}
+                        style={{
+                          textAlign: i === 2 || i === 3 ? 'right' : 'left',
+                          font: `600 11px/1 ${FONT}`,
+                          letterSpacing: '.13em',
+                          textTransform: 'uppercase',
+                          color: C.inkSoft,
+                          padding: '14px 18px',
+                          borderBottom: `1px solid ${C.border}`,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                );
-              })}
-            </Table>
+                </thead>
+                <tbody>
+                  {filtered.map((r) => {
+                    const state = stateOf(r);
+                    const { color, tint } = statusColors(state);
+                    const pct = r.reorderPoint > 0 ? (r.qtyOnHand / r.reorderPoint) * 100 : 0;
+                    const past = r.daysToExpiry != null && r.daysToExpiry <= 0;
+                    const soon = r.daysToExpiry != null && r.daysToExpiry <= 90;
+                    const expiryColor = past ? C.red : soon ? C.amber : C.inkMuted;
+                    return (
+                      <tr key={r.id}>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `400 14px/1.6 ${FONT}`,
+                            color: C.ink,
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                            {r.drug.coldChain && (
+                              <span
+                                style={{
+                                  font: `600 9px/1 ${MONO}`,
+                                  letterSpacing: '.04em',
+                                  background: C.blueTint,
+                                  color: C.blue,
+                                  padding: '4px 5px',
+                                }}
+                              >
+                                2–8°
+                              </span>
+                            )}
+                            <div>
+                              <div style={{ fontWeight: 500 }}>{r.drug.name}</div>
+                              <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 4 }}>
+                                {r.drug.genericName ?? '—'}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `500 13px/1.5 ${MONO}`,
+                            color: C.ink,
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          <Link
+                            href="/tracking"
+                            style={{
+                              border: 0,
+                              background: 'transparent',
+                              font: `500 12px/1 ${MONO}`,
+                              color: C.ink,
+                              borderBottom: `1px dotted ${C.inkGhost}`,
+                              textDecoration: 'none',
+                            }}
+                          >
+                            {r.batchRef ?? '—'}
+                          </Link>
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `500 14px/1.4 ${MONO}`,
+                            color: C.ink,
+                            textAlign: 'right',
+                            fontVariantNumeric: 'tabular-nums',
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {num(r.qtyOnHand)}
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `400 14px/1.4 ${MONO}`,
+                            color: C.inkMuted,
+                            textAlign: 'right',
+                            fontVariantNumeric: 'tabular-nums',
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {num(r.reorderPoint)}
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `400 13px/1.5 ${MONO}`,
+                            color: expiryColor,
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {r.expiryDate ? new Date(r.expiryDate).toLocaleDateString('en-GB') : '—'}
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `400 14px/1.6 ${FONT}`,
+                            color: C.inkMuted,
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {r.location ?? '—'}
+                        </td>
+                        <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}`, verticalAlign: 'top' }}>
+                          <Pill label={state} color={color} tint={tint} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       </div>

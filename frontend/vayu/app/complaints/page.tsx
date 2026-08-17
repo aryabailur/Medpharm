@@ -15,7 +15,7 @@ import {
   type RcaInsights,
   type RcaSummary,
 } from '../../lib/api';
-import { C, FONT, MONO } from '../../lib/theme';
+import { C, FONT, MONO, rise, statusColors } from '../../lib/theme';
 import { ApiError, Button, Card, CardTitle, Empty, Kpi, KpiBand, PageHeader, Pill, Segmented } from '../../components/ui';
 import { RcaDashboard } from './RcaCharts';
 
@@ -129,13 +129,22 @@ export default function ComplaintsPage() {
         <Kpi label="With RCA" value={withRca} />
       </KpiBand>
 
-      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
+      <div style={{ padding: '26px 26px 52px', display: 'grid', gap: 24 }}>
         {error && <ApiError error={error} />}
 
         <RcaDashboard summary={rcaSummary} insights={rcaInsights} loading={rcaLoading} />
 
-        <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
-          <Card style={{ flex: '1 1 380px', minWidth: 320, maxWidth: 440, animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
+        {/* The handoff pairs the queue against the root cause: a narrow list on
+            the left, the evidence and narration filling the right. */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0,0.9fr) minmax(0,1.25fr)',
+            gap: 24,
+            alignItems: 'start',
+          }}
+        >
+          <Card style={{ animation: rise(0) }}>
             <CardTitle>Complaints</CardTitle>
             {complaints.length === 0 ? (
               <Empty>No complaints match this filter.</Empty>
@@ -143,6 +152,7 @@ export default function ComplaintsPage() {
               <div style={{ maxHeight: 640, overflowY: 'auto' }}>
                 {complaints.map((c) => {
                   const active = c.id === selectedId;
+                  const sc = statusColors(c.status);
                   return (
                     <button
                       key={c.id}
@@ -151,21 +161,46 @@ export default function ComplaintsPage() {
                         display: 'block',
                         width: '100%',
                         textAlign: 'left',
-                        padding: '10px 14px',
-                        border: 'none',
+                        padding: '17px 18px',
+                        border: 0,
+                        borderLeft: `2px solid ${active ? C.ink : 'transparent'}`,
                         borderBottom: `1px solid ${C.borderSoft}`,
-                        background: active ? C.accentTint : 'transparent',
+                        background: active ? C.bg : 'transparent',
                         cursor: 'pointer',
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                        <Pill label={c.category} />
-                        <span style={{ font: `400 10px/1 ${MONO}`, color: C.inkGhost }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                        <span
+                          style={{
+                            font: `600 11px/1 ${FONT}`,
+                            letterSpacing: '.07em',
+                            padding: '5px 9px',
+                            borderRadius: 4,
+                            background: sc.tint,
+                            color: sc.color,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {c.status}
+                        </span>
+                        <span
+                          style={{
+                            font: `500 12px/1 ${MONO}`,
+                            color: C.ink,
+                            borderBottom: `1px dotted ${C.inkGhost}`,
+                          }}
+                        >
+                          {c.id.slice(0, 8)}
+                        </span>
+                        <div style={{ flex: 1 }} />
+                        <span style={{ font: `400 10px/1 ${MONO}`, color: C.inkSoft }}>
                           {new Date(c.filedAt).toLocaleDateString('en-GB')}
                         </span>
                       </div>
-                      <div style={{ font: `600 13px/1.4 ${FONT}`, color: C.ink, marginTop: 6 }}>{drugName(c)}</div>
-                      <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkSoft, marginTop: 2 }}>
+                      <div style={{ font: `500 13px/1.45 ${FONT}`, color: C.ink, marginTop: 8 }}>
+                        {c.category} · {drugName(c)}
+                      </div>
+                      <div style={{ font: `400 11px/1.5 ${MONO}`, color: C.inkFaint, marginTop: 4 }}>
                         {c.institution?.name ?? 'Unknown institution'}
                       </div>
                     </button>

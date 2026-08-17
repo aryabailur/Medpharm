@@ -10,25 +10,29 @@
  *
  * Ports the handoff's three-tier chrome verbatim:
  *   56px header   brand · context line · ⌘K palette · live clock
- *   48px nav      four numbered domains, active one underlined in ink
+ *   50px nav      four numbered domains, active one underlined in ink, plus a
+ *                 live store readout on the right
  *   48px sub-tabs screens within the active domain, plus a context meta line
  *
- * Both nav rows are sticky (top: 56 and top: 104) so the chrome stays put while
- * a long table scrolls under it. That stickiness is why the geometry is fixed
- * rather than fluid.
+ * All three rows are sticky (top: 0, 56, 106) so the chrome stays put while a
+ * long table scrolls under it. That stickiness is why the geometry is fixed
+ * rather than fluid — the offsets come from SHELL in lib/theme.ts.
  */
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-import { C, FONT, MONO, SHELL } from '../lib/theme';
+import { getIncoming, getInventory } from '../lib/api';
+import { C, EASE, FONT, MONO, SHELL } from '../lib/theme';
 
 interface Screen {
   href: string;
   label: string;
   title: string;
   meta: string;
+  /** Count shown beside the sub-tab label, as the handoff's badges do. */
+  badge?: string;
 }
 
 const DOMAINS: Array<{ idx: string; label: string; screens: Screen[] }> = [
@@ -83,6 +87,31 @@ export default function Nav() {
   const [clock, setClock] = useState('');
   const [palette, setPalette] = useState(false);
   const [q, setQ] = useState('');
+  const [belowReorder, setBelowReorder] = useState(0);
+  const [inboundExcursions, setInboundExcursions] = useState(0);
+
+  // The nav's store readout: what's below its reorder point, and whether any
+  // inbound freight is carrying an excursion. Counted from real rows so the
+  // chrome never contradicts the screen underneath it; silent on failure,
+  // since a dead API shouldn't blank the whole shell.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [inv, inbound] = await Promise.all([getInventory('?take=500'), getIncoming()]);
+        if (cancelled) return;
+        setBelowReorder(
+          inv.items.filter((r) => r.lowStock ?? r.qtyOnHand < r.reorderPoint).length,
+        );
+        setInboundExcursions(inbound.items.filter((s) => s.anomalyFlag).length);
+      } catch {
+        /* leave the counters at zero */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   // Live clock, as the handoff's header shows.
   useEffect(() => {
@@ -110,7 +139,18 @@ export default function Nav() {
 
   const current = activeScreen(pathname);
   const currentDomain = DOMAINS.find((d) => d.screens.some((s) => s.href === current.href)) ?? DOMAINS[0]!;
-  const hits = ALL.filter((s) => s.label.toLowerCase().includes(q.toLowerCase()) || s.title.toLowerCase().includes(q.toLowerCase()));
+
+  const needle = q.trim().toLowerCase();
+  const hits = DOMAINS.flatMap((d) =>
+    d.screens
+      .filter(
+        (s) =>
+          !needle ||
+          s.label.toLowerCase().includes(needle) ||
+          s.title.toLowerCase().includes(needle),
+      )
+      .map((s) => ({ ...s, domain: d.label })),
+  );
 
   return (
     <>
@@ -267,23 +307,50 @@ export default function Nav() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 9,
-                padding: '0 18px',
-                border: 'none',
+                gap: 8,
+                padding: '0 20px',
+                border: 0,
                 borderBottom: `2px solid ${active ? C.ink : 'transparent'}`,
                 background: 'transparent',
                 color: active ? C.ink : C.inkFaint,
-                font: `${active ? 600 : 500} 13px/1 ${FONT}`,
+                font: `600 13px/1 ${FONT}`,
+                letterSpacing: '.12em',
+                textTransform: 'uppercase',
                 cursor: 'pointer',
+                transition: 'color .12s ease',
               }}
             >
-              <span style={{ font: `500 10px/1 ${MONO}`, color: active ? C.ink : C.inkGhost }}>
-                {d.idx}
-              </span>
+              <span style={{ font: `500 10px/1 ${MONO}`, color: C.inkSoft }}>{d.idx}</span>
               {d.label}
             </button>
           );
         })}
+
+        <div style={{ flex: 1 }} />
+
+        {/* Store readout — the two numbers that decide whether a pharmacist
+            needs to act, visible from every screen. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span
+            style={{
+              font: `600 11px/1 ${FONT}`,
+              letterSpacing: '.1em',
+              textTransform: 'uppercase',
+              color: C.inkFaint,
+            }}
+          >
+            Store
+          </span>
+          <span style={{ font: `500 11px/1 ${MONO}`, color: belowReorder > 0 ? C.red : C.inkSoft }}>
+            {belowReorder} below reorder
+          </span>
+          <span style={{ width: 1, height: 10, background: C.border }} />
+          <span
+            style={{ font: `500 11px/1 ${MONO}`, color: inboundExcursions > 0 ? C.amber : C.inkSoft }}
+          >
+            {inboundExcursions} inbound excursion{inboundExcursions === 1 ? '' : 's'}
+          </span>
+        </div>
       </nav>
 
       {/* ── Sub-tabs ───────────────────────────────────────────────────── */}
@@ -311,16 +378,22 @@ export default function Nav() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                border: `1px solid ${active ? C.border : 'transparent'}`,
+                border: `1px solid ${active ? C.borderActive : 'transparent'}`,
                 background: active ? C.surface : 'transparent',
-                color: active ? C.ink : C.inkFaint,
+                color: active ? C.ink : C.inkMuted,
                 padding: '9px 13px',
                 borderRadius: SHELL.radius,
                 font: `500 13px/1 ${FONT}`,
                 textDecoration: 'none',
+                transition: 'border-color .12s ease',
               }}
             >
               {s.label}
+              {s.badge && (
+                <span style={{ font: `500 10px/1 ${MONO}`, color: active ? C.amber : C.inkGhost }}>
+                  {s.badge}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -337,47 +410,70 @@ export default function Nav() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(23,22,20,.35)',
-            zIndex: 40,
+            background: 'rgba(23,22,20,0.22)',
+            zIndex: 50,
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'center',
-            paddingTop: 120,
+            paddingTop: '12vh',
+            animation: 'mtFade .14s ease both',
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: 520,
-              maxWidth: '90vw',
+              width: 560,
+              maxWidth: '92vw',
               background: C.surface,
               border: `1px solid ${C.border}`,
-              borderRadius: SHELL.radius,
+              borderRadius: 6,
               overflow: 'hidden',
+              animation: `mtRise .22s ${EASE} both`,
             }}
           >
-            <input
-              autoFocus
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && hits[0]) {
-                  router.push(hits[0].href);
-                  setPalette(false);
-                }
-              }}
-              placeholder="Search or jump to…"
+            <div
               style={{
-                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
                 padding: '13px 15px',
-                border: 'none',
-                borderBottom: `1px solid ${C.borderSoft}`,
-                font: `400 14px/1 ${FONT}`,
-                color: C.ink,
-                outline: 'none',
+                borderBottom: `1px solid ${C.border}`,
               }}
-            />
-            <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+            >
+              <span style={{ font: `400 13px/1 ${MONO}`, color: C.inkSoft }}>⌕</span>
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && hits[0]) {
+                    router.push(hits[0].href);
+                    setPalette(false);
+                  }
+                }}
+                placeholder="Jump to a screen, drug or shipment…"
+                style={{
+                  flex: 1,
+                  border: 0,
+                  outline: 'none',
+                  font: `400 14px/1.2 ${FONT}`,
+                  color: C.ink,
+                  background: 'transparent',
+                }}
+              />
+              <span
+                style={{
+                  font: `400 10px/1 ${MONO}`,
+                  color: C.inkSoft,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 2,
+                  padding: '3px 5px',
+                }}
+              >
+                ESC
+              </span>
+            </div>
+            <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {hits.length === 0 ? (
                 <div style={{ padding: 15, font: `400 12px/1 ${FONT}`, color: C.inkGhost }}>
                   Nothing matches “{q}”.
@@ -393,18 +489,33 @@ export default function Nav() {
                     style={{
                       display: 'flex',
                       width: '100%',
-                      alignItems: 'baseline',
-                      gap: 10,
-                      padding: '10px 15px',
-                      border: 'none',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '11px 15px',
+                      border: 0,
                       borderBottom: `1px solid ${C.borderSoft}`,
                       background: 'transparent',
                       cursor: 'pointer',
                       textAlign: 'left',
                     }}
                   >
-                    <span style={{ font: `500 13px/1 ${FONT}`, color: C.ink }}>{s.label}</span>
-                    <span style={{ font: `400 11px/1 ${MONO}`, color: C.inkGhost }}>{s.title}</span>
+                    <span
+                      style={{
+                        font: `500 10px/1 ${MONO}`,
+                        letterSpacing: '.08em',
+                        color: C.inkSoft,
+                        width: 64,
+                        flex: '0 0 64px',
+                      }}
+                    >
+                      {s.domain}
+                    </span>
+                    <span style={{ flex: 1, font: `400 13px/1 ${FONT}`, color: C.ink }}>{s.title}</span>
+                    <span
+                      style={{ font: `400 10px/1 ${MONO}`, letterSpacing: '.06em', color: C.inkSoft }}
+                    >
+                      SCREEN
+                    </span>
                   </button>
                 ))
               )}
