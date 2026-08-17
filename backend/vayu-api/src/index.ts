@@ -36,7 +36,10 @@ import { catalogRoutes } from './routes/catalog/index.js';
 import { ordersApproveRoutes } from './routes/orders/approve.js';
 import { ordersIncomingRoutes } from './routes/orders/incoming.js';
 import { ordersListRoutes } from './routes/orders/list.js';
+import { complaintRoutes } from './routes/complaints/incoming.js';
+import { consumptionRoutes } from './routes/consumption/report.js';
 import { sensorRoutes } from './routes/sensors/ingest.js';
+import { shipmentRoutes } from './routes/shipments/index.js';
 import { streamRoutes } from './routes/stream/shipments.js';
 import { startRetryWorker } from './lib/webhooks/dispatch.js';
 
@@ -63,6 +66,9 @@ await app.register(ordersIncomingRoutes, { prefix: '/api/orders' });
 await app.register(ordersApproveRoutes, { prefix: '/api/orders' });
 await app.register(sensorRoutes, { prefix: '/api/sensors' });
 await app.register(streamRoutes, { prefix: '/api/stream' });
+await app.register(complaintRoutes, { prefix: '/api/complaints' });
+await app.register(consumptionRoutes, { prefix: '/api/consumption' });
+await app.register(shipmentRoutes, { prefix: '/api/shipments' });
 
 // ─── Routes to implement, by phase (§9) ──────────────────────────────────────
 //
