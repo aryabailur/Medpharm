@@ -25,9 +25,9 @@ import {
   type CriticalStockRow,
   type VendorMetric,
 } from '../../lib/api';
-import { C, FONT, LABEL, rupees } from '../../lib/theme';
+import { C, FONT, LABEL, MONO, rupees } from '../../lib/theme';
 import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Table, Td } from '../../components/ui';
-import { BarChart, Histogram, LineChart, MultiLineChart, ScatterPlot } from '../../components/charts';
+import { BarChart, Histogram, LineChart, MultiLineChart, PieChart, ScatterPlot } from '../../components/charts';
 
 /**
  * Section divider — the page reads as three questions in causal order:
@@ -335,7 +335,42 @@ export default function AnalyticsPage() {
             {!stockHealth || stockHealth.buckets.length === 0 ? (
               <Empty>No stock data.</Empty>
             ) : (
-              <Histogram buckets={stockHealth.buckets} />
+              <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 28, alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <PieChart
+                    data={stockHealth.buckets.map((b, i) => ({
+                      label: b.label,
+                      value: b.count,
+                      color: [C.red, C.amber, C.accent, C.green, C.grey][i % 5],
+                    }))}
+                    size={130}
+                  />
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {stockHealth.buckets.map((b, i) => (
+                      <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 4,
+                            background: [C.red, C.amber, C.accent, C.green, C.grey][i % 5],
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ font: `500 11px/1.3 ${FONT}`, color: C.inkMuted }}>
+                          {b.label}{' '}
+                          <span style={{ font: `500 11px/1.3 ${MONO}`, color: C.ink }}>
+                            {b.count.toLocaleString('en-IN')}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ borderLeft: `1px solid ${C.borderSoft}`, paddingLeft: 24 }}>
+                  <Histogram buckets={stockHealth.buckets} />
+                </div>
+              </div>
             )}
           </div>
           {stockHealth && stockHealth.critical.length > 0 && (
@@ -385,6 +420,37 @@ export default function AnalyticsPage() {
               <Empty>No expiry data.</Empty>
             ) : (
               <>
+                <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginBottom: 14 }}>
+                  <PieChart
+                    data={expiry.map((e, i) => ({
+                      label: e.label,
+                      value: e.valueInr,
+                      color: [C.red, C.amber, C.accent, C.grey][i % 4],
+                    }))}
+                    size={120}
+                  />
+                  <div style={{ display: 'grid', gap: 5 }}>
+                    {expiry.map((e, i) => (
+                      <div key={e.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 4,
+                            background: [C.red, C.amber, C.accent, C.grey][i % 4],
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ font: `500 11px/1.3 ${FONT}`, color: C.inkMuted }}>
+                          {e.label}{' '}
+                          <span style={{ font: `500 11px/1.3 ${MONO}`, color: C.ink }}>
+                            {rupees(e.valueInr)}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <BarChart data={expiryBars} valueFormat={(v) => rupees(v)} />
                 <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 10 }}>
                   {rupees(expiryNext3mo || totalExpiryValue)} of stock value is at risk of expiry in the next 3

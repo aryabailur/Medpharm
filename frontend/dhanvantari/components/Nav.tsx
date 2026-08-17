@@ -51,6 +51,7 @@ const DOMAINS: Array<{ idx: string; label: string; screens: Screen[] }> = [
     label: 'Supply',
     screens: [
       { href: '/orders', label: 'Supply Orders', title: 'Supply Orders', meta: 'placed with the supplier' },
+      { href: '/batches', label: 'Batch Catalogue', title: 'Batch Catalogue', meta: 'received lots · acceptance · print labels' },
       { href: '/shipments', label: 'Incoming', title: 'Incoming Shipments', meta: 'mirrored from Vayu over the contract' },
       { href: '/tracking', label: 'Tracking + Excursions', title: 'Tracking + Excursions', meta: 'live position · cold-chain warnings' },
       { href: '/scanin', label: 'Scan-in', title: 'Scan-in', meta: 'QR resolves batch, drug, expiry, QC' },

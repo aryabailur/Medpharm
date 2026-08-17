@@ -7,11 +7,12 @@
  * Click a drug row to expand and see per-batch detail + print buttons.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { getBatches, type Batch } from '../../lib/api';
-import { C, FONT, MONO, rise, stagger } from '../../lib/theme';
+import { C, FONT, MONO, statusColors } from '../../lib/theme';
 import { Search } from 'lucide-react';
-import { ApiError, Card, PageHeader } from '../../components/ui';
+import { ApiError, Card, CardTitle, Kpi, KpiBand, PageHeader } from '../../components/ui';
+import { BarChart, PieChart } from '../../components/charts';
 import BatchCatalog from '../../components/BatchCatalog';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -37,98 +38,97 @@ export default function Batches() {
   });
   const coldChain = batches.filter((b) => b.drug?.coldChain);
 
+  const qcStatusData = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const b of batches) {
+      map.set(b.status, (map.get(b.status) ?? 0) + 1);
+    }
+    return Array.from(map.entries()).map(([status, count]) => ({
+      label: status.replace(/_/g, ' '),
+      value: count,
+      color: statusColors(status).color,
+    }));
+  }, [batches]);
+
+  const expiryWindowBars = useMemo(() => {
+    const b = { expired: 0, d30: 0, d90: 0, d180: 0, over180: 0 };
+    for (const batch of batches) {
+      const days = (new Date(batch.expiryDate).getTime() - now) / DAY_MS;
+      if (days <= 0) b.expired += 1;
+      else if (days <= 30) b.d30 += 1;
+      else if (days <= 90) b.d90 += 1;
+      else if (days <= 180) b.d180 += 1;
+      else b.over180 += 1;
+    }
+    return [
+      { label: 'Expired', value: b.expired, color: C.red },
+      { label: '≤30 d', value: b.d30, color: C.amber },
+      { label: '31–90 d', value: b.d90, color: C.accent },
+      { label: '91–180 d', value: b.d180, color: C.blue },
+      { label: '>180 d', value: b.over180, color: C.green },
+    ];
+  }, [batches, now]);
+
   return (
     <>
       <PageHeader title="Batches + QC" />
 
-      {/* The handoff's secondary KPI strip: 32px figures, colour carrying the
-          reading, flush to the page edges rather than sitting in cards. */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-          background: C.surface,
-          borderBottom: `1px solid ${C.border}`,
-        }}
-      >
-        {[
-          { label: 'Total batches', value: batches.length, color: C.ink, note: 'Manufactured lots on record' },
-          { label: 'QC approved', value: qcApproved.length, color: C.green, note: 'Cleared for allocation' },
-          {
-            label: 'Expiring ≤ 90 d',
-            value: expiringSoon.length,
-            color: expiringSoon.length ? C.amber : C.grey,
-            note: 'Dispatch these first',
-          },
-          { label: 'Cold chain', value: coldChain.length, color: C.blue, note: 'Held at 2–8 °C' },
-        ].map((k, i) => (
-          <div
-            key={k.label}
-            style={{
-              padding: '24px 26px',
-              borderRight: i === 3 ? 'none' : `1px solid ${C.borderFaint}`,
-              animation: stagger(i),
-            }}
-          >
-            <div
-              style={{
-                font: `600 11px/1 ${FONT}`,
-                letterSpacing: '.17em',
-                textTransform: 'uppercase',
-                color: C.inkFaint,
-              }}
-            >
-              {k.label}
-            </div>
-            <div
-              style={{
-                font: `600 32px/1 ${MONO}`,
-                letterSpacing: '-.03em',
-                fontVariantNumeric: 'tabular-nums',
-                color: k.color,
-                marginTop: 12,
-              }}
-            >
-              {loading ? '…' : k.value}
-            </div>
-            <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>{k.note}</div>
-          </div>
-        ))}
-      </div>
+      <KpiBand columns={4}>
+        <Kpi label="Total batches" value={loading ? '…' : batches.length} />
+        <Kpi label="QC approved" value={loading ? '…' : qcApproved.length} deltaColor={C.green} />
+        <Kpi
+          label="Expiring ≤90d"
+          value={loading ? '…' : expiringSoon.length}
+          deltaColor={expiringSoon.length ? C.amber : C.grey}
+        />
+        <Kpi label="Cold chain" value={loading ? '…' : coldChain.length} deltaColor={C.accent} />
+      </KpiBand>
 
-      <div style={{ padding: '26px 26px 52px', display: 'grid', gap: 24 }}>
+      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
         {error ? (
           <ApiError error={error} />
         ) : (
-          <Card style={{ animation: rise(0) }}>
-            {/* Card header strip, then the search row beneath it — the handoff
-                always labels a card before its controls. */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 13,
-                padding: '17px 18px',
-                borderBottom: `1px solid ${C.border}`,
-                background: C.surfaceAlt,
-              }}
-            >
-              <span
-                style={{
-                  font: `600 11px/1 ${FONT}`,
-                  letterSpacing: '.17em',
-                  textTransform: 'uppercase',
-                  color: C.inkFaint,
-                }}
-              >
-                Batches · {loading ? '…' : batches.length} lots
-              </span>
-              <div style={{ flex: 1 }} />
-              <span style={{ font: `500 11px/1 ${MONO}`, color: C.inkFaint }}>
-                grouped by drug · click to expand
-              </span>
-            </div>
+          <>
+            {!loading && batches.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+                <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
+                  <CardTitle>QC status distribution</CardTitle>
+                  <div style={{ padding: 16, display: 'flex', gap: 20, alignItems: 'center' }}>
+                    <PieChart data={qcStatusData} size={140} />
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      {qcStatusData.map((d) => (
+                        <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: 4,
+                              background: d.color,
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span style={{ font: `500 11px/1.3 ${FONT}`, color: C.inkMuted }}>
+                            {d.label}{' '}
+                            <span style={{ font: `500 11px/1.3 ${MONO}`, color: C.ink }}>
+                              {d.value} batch{d.value === 1 ? '' : 'es'}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </Card>
 
+                <Card>
+                  <CardTitle>Batches by expiry horizon</CardTitle>
+                  <div style={{ padding: 16 }}>
+                    <BarChart data={expiryWindowBars} />
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
             {/* search bar */}
             <div style={{
               padding: '14px 16px',
@@ -177,6 +177,7 @@ export default function Batches() {
               <BatchCatalog batches={batches} searchQuery={search} />
             )}
           </Card>
+        </>
         )}
       </div>
     </>

@@ -4,7 +4,8 @@ import { useRef } from "react"
 import { useReactToPrint } from "react-to-print"
 import Barcode from "react-barcode"
 import { QRCodeCanvas } from "qrcode.react"
-import { C, FONT, rupees } from "@/lib/theme"
+import { Printer, QrCode } from "lucide-react"
+import { C } from "@/lib/theme"
 
 interface PrintBarcodeButtonProps {
   institutionName: string;
@@ -18,7 +19,6 @@ export function PrintBarcodeButton({
   institutionName,
   medicineName,
   barcode,
-  price,
   batch,
 }: PrintBarcodeButtonProps) {
   const barcodeRef = useRef<HTMLDivElement>(null);
@@ -47,45 +47,58 @@ export function PrintBarcodeButton({
   });
 
   const qrData = [
+    `Institution: ${institutionName}`,
     `Med: ${medicineName}`,
     `Barcode: ${barcode}`,
-    price != null ? `Price: ${rupees(price)}` : null,
     batch ? `Batch: ${batch}` : null,
   ].filter(Boolean).join("\n");
 
-  const btnStyle: React.CSSProperties = {
+  const iconBtnStyle: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
-    gap: 5,
-    padding: "5px 10px",
-    borderRadius: 6,
+    justifyContent: "center",
+    width: 26,
+    height: 26,
+    borderRadius: 5,
     border: `1px solid ${C.border}`,
     background: C.surface,
     color: C.inkMuted,
-    font: `500 11px/1.2 ${FONT}`,
     cursor: "pointer",
-    transition: "background 0.15s",
+    transition: "background 0.15s, color 0.15s, border-color 0.15s",
+    padding: 0,
   };
 
   return (
     <>
       <button
-        style={btnStyle}
+        style={iconBtnStyle}
         onClick={() => handlePrintBarcode()}
         title="Print Barcode Label"
-        onMouseOver={e => (e.currentTarget.style.background = C.greyTint)}
-        onMouseOut={e => (e.currentTarget.style.background = C.surface)}
+        onMouseOver={e => {
+          e.currentTarget.style.background = C.greyTint;
+          e.currentTarget.style.color = C.ink;
+        }}
+        onMouseOut={e => {
+          e.currentTarget.style.background = C.surface;
+          e.currentTarget.style.color = C.inkMuted;
+        }}
       >
-        🖨 Barcode
+        <Printer size={13} />
       </button>
       <button
-        style={btnStyle}
+        style={iconBtnStyle}
         onClick={() => handlePrintQR()}
         title="Print QR Code Label"
-        onMouseOver={e => (e.currentTarget.style.background = C.greyTint)}
-        onMouseOut={e => (e.currentTarget.style.background = C.surface)}
+        onMouseOver={e => {
+          e.currentTarget.style.background = C.greyTint;
+          e.currentTarget.style.color = C.ink;
+        }}
+        onMouseOut={e => {
+          e.currentTarget.style.background = C.surface;
+          e.currentTarget.style.color = C.inkMuted;
+        }}
       >
-        ▣ QR Code
+        <QrCode size={13} />
       </button>
 
       {/* Hidden printable area for Barcode */}
@@ -112,20 +125,22 @@ export function PrintBarcodeButton({
           <div style={{ fontSize: 10, fontWeight: 700, textAlign: "center", marginBottom: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {medicineName}
           </div>
-          <Barcode
-            value={barcode}
-            format="CODE128"
-            width={1.2}
-            height={20}
-            fontSize={10}
-            margin={0}
-            background="#ffffff"
-            lineColor="#000000"
-            displayValue={true}
-          />
-          {price != null && (
-            <div style={{ fontSize: 9, fontWeight: 700, marginTop: 4 }}>
-              {rupees(price)}
+          <div style={{ maxWidth: "100%", overflow: "hidden", display: "flex", justifyContent: "center" }}>
+            <Barcode
+              value={barcode}
+              format="CODE128"
+              width={0.8}
+              height={22}
+              fontSize={8}
+              margin={0}
+              background="#ffffff"
+              lineColor="#000000"
+              displayValue={true}
+            />
+          </div>
+          {batch && (
+            <div style={{ fontSize: 8, color: "#555", marginTop: 2 }}>
+              Batch: {batch}
             </div>
           )}
         </div>
@@ -161,11 +176,9 @@ export function PrintBarcodeButton({
             level="M"
             marginSize={0}
           />
-          {(price != null || batch) && (
+          {batch && (
             <div style={{ fontSize: 8, color: "#555", marginTop: 2, textAlign: "center" }}>
-              {price != null ? rupees(price) : ""}
-              {price != null && batch ? " | " : ""}
-              {batch ? `B: ${batch.substring(0, 15)}` : ""}
+              {batch.substring(0, 20)}
             </div>
           )}
         </div>
