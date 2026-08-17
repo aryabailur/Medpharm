@@ -19,7 +19,11 @@ import { prisma } from '../../lib/prisma.js';
 
 export async function ordersIncomingRoutes(app: FastifyInstance): Promise<void> {
   app.post('/incoming', { preHandler: verifyHmac }, async (req, reply) => {
-    const parsed = PlaceOrderSchema.safeParse(req.body);
+    // Senders wrap payloads in a `{ type, data }` envelope so the receiver can
+    // log the event type without parsing the URL. Accept both shapes — the
+    // sibling complaint/consumption/receipt routes already do.
+    const body = (req.body as { data?: unknown })?.data ?? req.body;
+    const parsed = PlaceOrderSchema.safeParse(body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', detail: parsed.error.flatten() });
     }

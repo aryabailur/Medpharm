@@ -9,8 +9,26 @@
  * SCAFFOLD — Phase 0.
  */
 
+// Load .env before anything reads process.env.
+//
+// Not a `--env-file` flag: `tsx watch` re-spawns a child on each change and the
+// flag does not reach it, so the secret silently goes missing on reload.
+import { loadEnvFile } from 'node:process';
+
+try {
+  loadEnvFile(new URL('../.env', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+} catch {
+  // No .env (e.g. production, where the platform injects real env vars).
+}
+
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
+
+import { startOutboundWorker } from './lib/outbound/sender.js';
+import { inventoryRoutes } from './routes/inventory/index.js';
+import { ordersListRoutes } from './routes/orders/list.js';
+import { ordersPlaceRoutes } from './routes/orders/place.js';
+import { posRoutes } from './routes/pos/index.js';
 
 const PORT = Number(process.env.PORT ?? 4001);
 const FRONTEND_ORIGIN = process.env.DHANVANTARI_WEB_ORIGIN ?? 'http://localhost:3001';
@@ -21,6 +39,12 @@ const app = Fastify({ logger: true });
 await app.register(cors, { origin: [FRONTEND_ORIGIN], credentials: true });
 
 app.get('/health', async () => ({ ok: true, service: 'dhanvantari-api' }));
+
+// --- ROUTES: append registration below, one per line, do not reorder above ---
+await app.register(inventoryRoutes, { prefix: '/api/inventory' });
+await app.register(posRoutes, { prefix: '/api/pos' });
+await app.register(ordersListRoutes, { prefix: '/api/orders' });
+await app.register(ordersPlaceRoutes, { prefix: '/api/orders' });
 
 // ─── Routes to implement, by phase (§9) ──────────────────────────────────────
 //
@@ -51,6 +75,8 @@ app.get('/health', async () => ({ ok: true, service: 'dhanvantari-api' }));
 const start = async () => {
   try {
     await app.listen({ port: PORT, host: '0.0.0.0' });
+    // Drains OutboundEvent to Vayu with 1s/4s/16s/60s backoff (§5.2).
+    startOutboundWorker(app.log);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
