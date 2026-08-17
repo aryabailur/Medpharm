@@ -34,10 +34,20 @@ model Drug {
   minTempC      Float?
   maxTempC      Float?
   shelfLifeDays Int?
+  // Dataset fields (§10)
+  form             String?
+  strength         String?
+  unitCostInr      Float?
+  abcClass         String?
+  seasonalProfile  String?
+  tierMin          String?
 
   batches         Batch[]
   supplyOrderLine SupplyOrderLine[]
   consumption     ConsumptionFeed[]
+  purchaseOrders  PurchaseOrder[]
+  ledger          StockLedger[]
+  currentStock    CurrentStock[]
 
   @@schema("vayu")
 }
@@ -107,10 +117,22 @@ model Institution {
   lng        Float?
   population Int?
   tier       String?
+  // Dataset fields (§10). parentInstitutionId is the district warehouse a
+  // facility indents on -- the middle link in vendor -> warehouse -> facility.
+  districtId           String?
+  block                String?
+  beds                 Int?
+  monthlyOpdAvg        Int?
+  parentInstitutionId  String?
+  hasColdChain         Boolean @default(false)
+  staffCount           Int?
 
-  supplyOrders SupplyOrder[]
-  complaints   Complaint[]
-  consumption  ConsumptionFeed[]
+  supplyOrders   SupplyOrder[]
+  complaints     Complaint[]
+  consumption    ConsumptionFeed[]
+  purchaseOrders PurchaseOrder[]
+  ledger         StockLedger[]
+  currentStock   CurrentStock[]
 
   @@index([district])
   @@schema("vayu")
@@ -379,5 +401,135 @@ model ProcessedEvent {
   eventId     String   @id
   processedAt DateTime @default(now())
 
+  @@schema("vayu")
+}
+
+// ─── MedTrack dataset layer ──────────────────────────────────────────────────
+// Backs the 48-month simulated supply chain in backend/data-gen/medtrack-datasets.
+// SHARED FILE (README §7): announced before editing.
+//
+// The dataset models vendor -> district warehouse -> facility. Vayu is the
+// network operator, so it holds all three: vendors it buys from, warehouses it
+// runs, and the facilities it supplies.
+
+model Vendor {
+  id                 String   @id            // VEN01..VEN06
+  name               String
+  reliabilityProfile String?
+  quotedLeadTimeDays Int?
+  gstin              String?
+  contactEmail       String?
+  empanelledSince    DateTime?
+
+  purchaseOrders PurchaseOrder[]
+
+  @@schema("vayu")
+}
+
+// Warehouse -> vendor orders. `delayDays` and `priceVariancePct` are what make
+// the scorecard's price-versus-reliability tradeoff visible.
+model PurchaseOrder {
+  id                  String    @id          // PO id from the dataset
+  poDate              DateTime
+  institutionId       String                 // the ordering warehouse
+  districtId          String?
+  vendorId            String
+  drugId              String
+  qtyOrdered          Int
+  unitPriceInr        Float?
+  cataloguePriceInr   Float?
+  priceVariancePct    Float?
+  expectedDeliveryDate DateTime?
+  actualDeliveryDate  DateTime?
+  leadTimeDays        Int?
+  delayDays           Int?
+  onTime              Boolean   @default(false)
+  qtyReceived         Int?
+  qtyRejected         Int?
+  qtyShortSupplied    Int?
+  rejectionReason     String?
+  status              String?
+  orderValueInr       Float?
+
+  vendor      Vendor      @relation(fields: [vendorId], references: [id])
+  institution Institution @relation(fields: [institutionId], references: [id])
+  drug        Drug        @relation(fields: [drugId], references: [id])
+
+  @@index([vendorId, poDate])
+  @@index([drugId])
+  @@index([institutionId])
+  @@schema("vayu")
+}
+
+// The core table: monthly opening/received/dispensed/expired/closing per drug
+// per institution. 88k rows.
+//
+// `estimatedTrueDemand` and `unmetDemand` are SIMULATION GROUND TRUTH and must
+// never be fed to the forecaster as features — a model trained on them would
+// be reading the answer. They exist to measure demand censoring: when a
+// facility stocks out, `dispensed` understates what patients actually needed.
+// `stockoutDays` is derived from unmet demand and IS a legitimate feature.
+model StockLedger {
+  id                  String   @id @default(uuid())
+  month               DateTime
+  institutionId       String
+  drugId              String
+  openingStock        Int
+  received            Int
+  dispensed           Int
+  expiredDamaged      Int
+  closingStock        Int
+  estimatedTrueDemand Int?
+  unmetDemand         Int?
+  stockoutDays        Int?
+  qtyIndentedOrIssued Int?
+
+  institution Institution @relation(fields: [institutionId], references: [id])
+  drug        Drug        @relation(fields: [drugId], references: [id])
+
+  @@index([institutionId, drugId, month])
+  @@index([drugId, month])
+  @@index([month])
+  @@schema("vayu")
+}
+
+// Latest-month snapshot. `current_stock` includes warehouse rows; filter
+// type != 'WAREHOUSE' for a facility dashboard, since warehouses legitimately
+// run near zero after issuing.
+model CurrentStock {
+  id                   String  @id @default(uuid())
+  institutionId        String
+  drugId               String
+  quantityOnHand       Int
+  avgMonthlyConsumption Float?
+  monthsOfStock        Float?
+  reorderLevel         Int?
+  belowReorder         Boolean @default(false)
+  asOfMonth            DateTime?
+
+  institution Institution @relation(fields: [institutionId], references: [id])
+  drug        Drug        @relation(fields: [drugId], references: [id])
+
+  @@unique([institutionId, drugId])
+  @@index([belowReorder])
+  @@schema("vayu")
+}
+
+// Monthly disease incidence by district. The forecaster's lagged district
+// disease cases are a top feature, so this carries real signal.
+model DiseaseSignal {
+  id                String   @id @default(uuid())
+  month             DateTime
+  districtId        String
+  districtName      String
+  disease           String
+  cases             Int
+  incidencePer100k  Float?
+  outbreakFlag      Boolean  @default(false)
+  cases3mAvg        Float?
+  trendPctVs3mAvg   Float?
+
+  @@index([districtId, month])
+  @@index([disease, month])
   @@schema("vayu")
 }
