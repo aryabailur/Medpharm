@@ -205,8 +205,26 @@ async function riskSummary(): Promise<Evidence> {
     byPair.set(key, cur);
   }
 
+  // Scoring a pair means a Nidana round-trip. Doing that for every pair with
+  // recent history (hundreds to low thousands on the full dataset) is what
+  // made this endpoint take 6+ seconds while the UI only ever shows the top
+  // 8. Rank on a cheap, no-network proxy first — closing stock against
+  // average recent consumption, i.e. rough cover days — and only send the
+  // most urgent-looking slice through the real scorer. Generous headroom
+  // (80 vs the 20 returned) so an imperfect proxy still finds the true top 20.
+  const RANK_CAP = 80;
+  const ranked = [...byPair.values()]
+    .map((p) => {
+      const avg = p.series.length ? p.series.reduce((a, b) => a + b, 0) / p.series.length : 0;
+      const coverProxy = avg > 0 ? p.closing / avg : p.closing > 0 ? Infinity : -1; // no consumption, some stock -> not urgent; zero stock -> most urgent
+      return { p, coverProxy };
+    })
+    .sort((a, b) => a.coverProxy - b.coverProxy)
+    .slice(0, RANK_CAP)
+    .map((x) => x.p);
+
   const scored = await Promise.all(
-    [...byPair.values()].map(async (p) => {
+    ranked.map(async (p) => {
       const r = await risk({
         institutionId: p.institutionId,
         drugId: p.drugId,
@@ -376,14 +394,17 @@ async function demandForecast(entities: Entities): Promise<Evidence> {
     byPair.set(key, cur);
   }
 
-  // Forecasting all ~1500 institution/drug pairs takes seconds and nobody
-  // reads past the top of the list. Rank by recent volume and forecast the top
-  // 25 — the pairs that actually move the network. §9's gate is 6 demo
-  // questions in under 3s, and an unbounded fan-out blows it.
+  // Forecasting all ~1500 institution/drug pairs takes seconds — LightGBM
+  // trains a point + two quantile regressors per pair, so it's real CPU work,
+  // not just network overhead — and nobody reads past the top of the list
+  // (frontend/vayu/app/risk/page.tsx renders only the top 6). Rank by recent
+  // volume and forecast the top 10 — a small buffer over what's shown, not
+  // the 25 the UI never used. §9's gate is 6 demo questions in under 3s, and
+  // an unbounded fan-out blows it.
   const ranked = [...byPair.values()]
     .map((p) => ({ p, recent: p.history.slice(-3).reduce((a, h) => a + h.dispensed, 0) }))
     .sort((a, b) => b.recent - a.recent)
-    .slice(0, 25)
+    .slice(0, 10)
     .map((x) => x.p);
 
   const results = await Promise.all(
