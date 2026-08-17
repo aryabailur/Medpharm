@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "module": "esnext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -9,7 +11,17 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "isolatedModules": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@prisma/client": [
+        "./node_modules/.prisma/client/index.d.ts"
+      ]
+    }
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

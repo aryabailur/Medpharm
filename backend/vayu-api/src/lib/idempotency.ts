@@ -15,8 +15,12 @@
  * check is atomic.
  */
 
-import { Prisma } from '@prisma/client';
+// Relative path, not '@prisma/client' — see the note in prisma.ts.
+import pkg from '../../node_modules/.prisma/client/index.js';
+
 import { prisma } from './prisma.js';
+
+const { Prisma } = pkg as { Prisma: { PrismaClientKnownRequestError: new (...a: never[]) => Error & { code: string } } };
 
 /**
  * Claim an event id.

@@ -14,10 +14,28 @@
  * SCAFFOLD — Phase 0.
  */
 
+// Load .env before anything reads process.env.
+//
+// Not a `--env-file` flag: `tsx watch` re-spawns a child on each change and the
+// flag does not reach it, so the secret silently goes missing on reload. Doing
+// it here means the env is loaded however the process was started.
+import { loadEnvFile } from 'node:process';
+
+try {
+  loadEnvFile(new URL('../.env', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+} catch {
+  // No .env (e.g. production, where the platform injects real env vars).
+}
+
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 
 import { registerRawBodyParser } from './lib/hmac-middleware.js';
+import { batchRoutes } from './routes/batches/index.js';
+import { catalogRoutes } from './routes/catalog/index.js';
+import { ordersApproveRoutes } from './routes/orders/approve.js';
+import { ordersIncomingRoutes } from './routes/orders/incoming.js';
+import { ordersListRoutes } from './routes/orders/list.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const FRONTEND_ORIGIN = process.env.VAYU_WEB_ORIGIN ?? 'http://localhost:3000';
@@ -35,6 +53,11 @@ registerRawBodyParser(app);
 app.get('/health', async () => ({ ok: true, service: 'vayu-api' }));
 
 // --- ROUTES: append registration below, one per line, do not reorder above ---
+await app.register(catalogRoutes, { prefix: '/api/catalog' });
+await app.register(batchRoutes, { prefix: '/api/batches' });
+await app.register(ordersListRoutes, { prefix: '/api/orders' });
+await app.register(ordersIncomingRoutes, { prefix: '/api/orders' });
+await app.register(ordersApproveRoutes, { prefix: '/api/orders' });
 
 // ─── Routes to implement, by phase (§9) ──────────────────────────────────────
 //

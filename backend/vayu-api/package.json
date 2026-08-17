@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Vayu API server — Prisma, webhooks, SSE, HMAC. Holds the shared secret.",
+  "description": "Vayu API server \u2014 Prisma, webhooks, SSE, HMAC. Holds the shared secret.",
   "main": "./src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
