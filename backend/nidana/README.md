@@ -8,6 +8,35 @@ Named for the Ayurvedic term for diagnosis/etiology.
 
 ---
 
+## Start here
+
+Paste one of these into Claude Code at the repo root. It reads this README, picks up your Part's owned file globs, and stays inside them.
+
+**Part 1:**
+
+```
+Read backend/nidana/README.md. I'm taking Part 1.
+Start with the 5-signal risk score and its drilldown JSON.
+```
+
+**Part 2:**
+
+```
+Read backend/nidana/README.md. I'm taking Part 2.
+Start with the LightGBM forecast service and its features.
+```
+
+Branch first — never commit to `main`:
+
+```bash
+git checkout main && git pull origin main
+git checkout -b feat/<short-name>
+```
+
+See [WORKPLAN.md](../../WORKPLAN.md) for the assignment table across all six deployables.
+
+---
+
 ## 1. What it is / what it owns / what it does NOT own
 
 **What it is:**

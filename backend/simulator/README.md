@@ -5,6 +5,35 @@
 
 ---
 
+## Start here
+
+Paste one of these into Claude Code at the repo root. It reads this README, picks up your Part's owned file globs, and stays inside them.
+
+**Part 1:**
+
+```
+Read backend/simulator/README.md. I'm taking Part 1.
+Start with route interpolation and the CLI entrypoint.
+```
+
+**Part 2:**
+
+```
+Read backend/simulator/README.md. I'm taking Part 2.
+Start with the temperature model and excursion injection.
+```
+
+Branch first — never commit to `main`:
+
+```bash
+git checkout main && git pull origin main
+git checkout -b feat/<short-name>
+```
+
+See [WORKPLAN.md](../../WORKPLAN.md) for the assignment table across all six deployables.
+
+---
+
 ## 1. What it is / what it owns / what it does NOT own
 
 **What it is:**

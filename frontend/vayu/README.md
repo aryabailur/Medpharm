@@ -6,6 +6,35 @@
 
 ---
 
+## Start here
+
+Paste one of these into Claude Code at the repo root. It reads this README, picks up your Part's owned file globs, and stays inside them.
+
+**Part 1:**
+
+```
+Read frontend/vayu/README.md. I'm taking Part 1.
+Start with the drug catalog screen.
+```
+
+**Part 2:**
+
+```
+Read frontend/vayu/README.md. I'm taking Part 2.
+Start with the shipment dispatch screen.
+```
+
+Branch first — never commit to `main`:
+
+```bash
+git checkout main && git pull origin main
+git checkout -b feat/<short-name>
+```
+
+See [WORKPLAN.md](../../WORKPLAN.md) for the assignment table across all six deployables.
+
+---
+
 ## 1. What this app is
 
 Vayu is the manufacturer/supplier-facing Next.js 15 App Router app (ARCHITECTURE.md §3). It renders the catalog, batch + QR generation, QC records, supply-order approval queue, shipment dispatch + manifest, live telemetry console (map + temp graph + status stepper), cold-chain excursions, complaints + RCA, the evidence layer, batch trace timeline, risk summary + drilldown, demand forecast, coverage gap map, the Institution Reliability Panel, and the network-scope assistant (§3, §7.3 intents M1–M12).

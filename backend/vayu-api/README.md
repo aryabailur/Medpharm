@@ -8,6 +8,35 @@ Fastify + Prisma. Called by `frontend/vayu` (:3000) over fetch + SSE, and by `dh
 
 ---
 
+## Start here
+
+Paste one of these into Claude Code at the repo root. It reads this README, picks up your Part's owned file globs, and stays inside them.
+
+**Part 1:**
+
+```
+Read backend/vayu-api/README.md. I'm taking Part 1.
+Start with the Prisma client singleton and the HMAC verify middleware.
+```
+
+**Part 2:**
+
+```
+Read backend/vayu-api/README.md. I'm taking Part 2.
+Start with `/api/sensors/ingest` and the excursion detector.
+```
+
+Branch first — never commit to `main`:
+
+```bash
+git checkout main && git pull origin main
+git checkout -b feat/<short-name>
+```
+
+See [WORKPLAN.md](../../WORKPLAN.md) for the assignment table across all six deployables.
+
+---
+
 ## 1. What this server owns
 
 - **Prisma client A**, the only process that may query the `vayu` schema.
