@@ -31,10 +31,25 @@ export async function supplierScorecardRoutes(app: FastifyInstance): Promise<voi
     const complaints = await prisma.localComplaint.findMany();
 
     const delivered = shipments.filter((s) => s.status === 'DELIVERED');
-    // On time = delivered without blowing the ETA we were given. Shipments with
-    // no ETA are excluded rather than counted as wins.
-    const withEta = delivered.filter((s) => s.etaAt != null);
-    const onTime = withEta.filter((s) => !s.etaAt || s.etaAt.getTime() >= Date.now());
+
+    // On time = the batches were scanned in on or before the promised ETA.
+    //
+    // `IncomingShipment` has no deliveredAt column -- this side only learns of
+    // delivery when a worker scans the stock in -- so the scan-in timestamp on
+    // the shipment's batches IS the delivery time, and it is the honest one to
+    // measure against: it is when the institution actually took custody.
+    //
+    // Shipments with no ETA, or none scanned in, are EXCLUDED rather than
+    // counted as wins. A scorecard that flatters the supplier is worthless.
+    const withEta = delivered.filter(
+      (s) => s.etaAt != null && s.receivedBatches.some((b) => b.scannedAt != null),
+    );
+    const onTime = withEta.filter((s) => {
+      const scannedAt = Math.min(
+        ...s.receivedBatches.filter((b) => b.scannedAt).map((b) => b.scannedAt.getTime()),
+      );
+      return scannedAt <= s.etaAt!.getTime();
+    });
 
     const totalExpected = shipments
       .flatMap((s) => s.receivedBatches)
