@@ -108,17 +108,26 @@ export async function complaintRcaRoutes(app: FastifyInstance): Promise<void> {
       where: { id: req.params.id },
       include: {
         batch: { include: { drug: true } },
+        drug: true,
         institution: { select: { name: true, district: true } },
         shipment: { include: { excursions: { orderBy: { startedAt: 'asc' } } } },
       },
     });
     if (!complaint) return reply.code(404).send({ error: 'not_found' });
 
+    // A complaint names a drug directly; the batch/lot is optional detail
+    // (only present when the filer scanned a QR).
+    const drug = complaint.drug ?? complaint.batch?.drug ?? null;
+
     const since90d = new Date(Date.now() - 90 * DAY_MS);
     const [sameDrug90d, sameInstitution90d, sameCategory90d] = await Promise.all([
-      complaint.batch?.drugId
+      drug?.id
         ? prisma.complaint.count({
-            where: { id: { not: complaint.id }, batch: { drugId: complaint.batch.drugId }, filedAt: { gte: since90d } },
+            where: {
+              id: { not: complaint.id },
+              filedAt: { gte: since90d },
+              OR: [{ drugId: drug.id }, { batch: { drugId: drug.id } }],
+            },
           })
         : Promise.resolve(0),
       complaint.institutionId
@@ -139,12 +148,12 @@ export async function complaintRcaRoutes(app: FastifyInstance): Promise<void> {
         status: complaint.status,
         filedAt: complaint.filedAt.toISOString(),
       },
-      product: complaint.batch?.drug
+      product: drug
         ? {
-            name: complaint.batch.drug.name,
-            coldChain: complaint.batch.drug.coldChain,
-            minTempC: complaint.batch.drug.minTempC,
-            maxTempC: complaint.batch.drug.maxTempC,
+            name: drug.name,
+            coldChain: drug.coldChain,
+            minTempC: drug.minTempC,
+            maxTempC: drug.maxTempC,
           }
         : {},
       excursions: (complaint.shipment?.excursions ?? []).map((e) => ({
