@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { askAssistant } from '../../lib/api';
 import { C, FONT, MONO, bandColors } from '../../lib/theme';
 import { ApiError, Card, Empty, Kpi, KpiBand, PageHeader } from '../../components/ui';
-import { Sparkline } from '../../components/charts';
+import { MiniSparkline as Sparkline } from '../../components/charts';
 
 interface RiskSignal {
   name: string;

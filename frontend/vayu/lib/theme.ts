@@ -27,20 +27,39 @@ export const C = {
   border: '#D6D2CB',
   borderSoft: '#EAE7E1',
   borderFaint: '#E5E1DA',
+  /** Active sub-tab border, and the scrollbar thumb / planned-route stroke. */
+  borderActive: '#C9C3BB',
+  rail: '#D7D3CC',
 
-  // Accent + semantics
+  // Accent + semantics — the handoff's exact values, not near-misses.
   accent: '#0E7490',
-  accentTint: '#E3F0F4',
+  accentTint: '#DDEEF0',
   amber: '#B45309',
-  amberTint: '#FDF3E2',
-  red: '#B42318',
-  redTint: '#FBEAE8',
-  green: '#186A3B',
-  greenTint: '#E8F1EB',
-  blue: '#175CD3',
-  blueTint: '#E7F0F9',
-  grey: '#5F5A53',
-  greyTint: '#F0EFEB',
+  amberTint: '#FBF0DC',
+  red: '#B91C1C',
+  redTint: '#F9E7E5',
+  green: '#146130',
+  greenTint: '#E7F3EA',
+  blue: '#1F6FB2',
+  blueTint: '#E6EFF7',
+  grey: '#6B665F',
+  greyTint: '#F0EEE9',
+
+  // Chart-specific fills the handoff names directly.
+  /** In-band temperature wash, and its legend swatch border. */
+  bandFill: '#EAF2EC',
+  bandStroke: '#CFE0D4',
+  /** Forecast confidence band (Vayu risk screen). */
+  forecastBand: '#E3E0F5',
+  forecastLine: '#4338CA',
+  /** Third expiry bucket / 61–90 day amber-yellow. */
+  ochre: '#CA8A04',
+  /** Hover fills for the two button variants. */
+  inkHover: '#332F2A',
+  amberHover: '#8A3F07',
+  /** Toast surface + its status dot. */
+  toastFg: '#F7F6F3',
+  toastDot: '#4ADE80',
 } as const;
 
 export const FONT =
@@ -58,7 +77,8 @@ export const LABEL = {
 /** Shell geometry, lifted from the handoff markup. */
 export const SHELL = {
   headerH: 56,
-  navH: 48,
+  /** The handoff's domain nav is 50px tall, so sub-tabs stick at 106. */
+  navH: 50,
   subTabH: 48,
   gutter: 26,
   radius: 4,
@@ -70,28 +90,41 @@ export const FIGURE = {
   letterSpacing: '-.02em',
 };
 
+/**
+ * Status → badge colours, following the handoff's semantic assignment.
+ *
+ * Green settles, blue is in-flight/informational, amber warns, red is
+ * critical, grey is closed or neutral. Note the handoff puts DISPATCHED and
+ * IN_TRANSIT on *blue* (`#1F6FB2`), not the teal accent — teal is reserved for
+ * chart strokes so a line never reads as a status.
+ */
 export function statusColors(status: string): { color: string; tint: string } {
   switch (status) {
     case 'APPROVED':
-    case 'DELIVERED':
     case 'QC_APPROVED':
     case 'PASS':
     case 'RESOLVED':
     case 'ACCEPTED':
+    case 'SETTLED':
+    case 'SCAN IN':
+    case 'OUT FOR DELIVERY':
+    case 'OUT_FOR_DELIVERY':
+    case 'OK':
       return { color: C.green, tint: C.greenTint };
     case 'PENDING':
     case 'PENDING_SYNC':
     case 'DISPATCHED':
     case 'IN_TRANSIT':
-    case 'OUT_FOR_DELIVERY':
-    case 'MANUFACTURED':
+    case 'IN TRANSIT':
     case 'INVESTIGATING':
-      return { color: C.accent, tint: C.accentTint };
+      return { color: C.blue, tint: C.blueTint };
     case 'PARTIAL':
-    case 'WAREHOUSED':
+    case 'MANUFACTURED':
     case 'MAJOR':
     case 'OPEN':
     case 'LOW':
+    case 'EXCURSION':
+    case 'EXPIRING':
       return { color: C.amber, tint: C.amberTint };
     case 'REJECTED':
     case 'EXCEPTION':
@@ -99,6 +132,7 @@ export function statusColors(status: string): { color: string; tint: string } {
     case 'FAIL':
     case 'CRITICAL':
       return { color: C.red, tint: C.redTint };
+    // DELIVERED, WAREHOUSED, CLOSED, MINOR, UNBILLED — settled and inert.
     default:
       return { color: C.grey, tint: C.greyTint };
   }
@@ -126,3 +160,36 @@ export function rupees(n: number): string {
 }
 
 export const num = (n: number) => n.toLocaleString('en-IN');
+
+// ─── Motion ──────────────────────────────────────────────────────────────────
+//
+// The handoff's easing curve and the seven keyframes it defines. Keeping the
+// strings here means a screen never hand-rolls a slightly different duration.
+
+export const EASE = 'cubic-bezier(.16,1,.3,1)';
+
+/** Card entrance. Sections stagger 0/40/60/100/120ms down the page. */
+export const rise = (delayMs = 0) =>
+  `mtRise .44s ${EASE} ${delayMs ? `${delayMs}ms ` : ''}both`;
+
+/**
+ * KPI-cell stagger, matching the handoff's `stag()` helper exactly:
+ * 60ms base, 55ms step, .5s duration.
+ */
+export const stagger = (i: number, step = 55, base = 60) =>
+  `mtRise .5s ${EASE} ${base + i * step}ms both`;
+
+/** Line-drawing reveal for an SVG stroke. Pair with strokeDasharray. */
+export const draw = (seconds = 1, delayMs = 0, dash = 3000) => ({
+  strokeDasharray: dash,
+  animation: `mtDraw ${seconds}s ${EASE} ${delayMs ? `${delayMs}ms ` : ''}both`,
+});
+
+/** Horizontal meter fill. Requires transformOrigin:'left' on the same node. */
+export const grow = (delayMs = 150) => `mtGrow .7s ${EASE} ${delayMs}ms both`;
+
+/** Vertical bar growth. Requires transformOrigin:'bottom'. */
+export const riseBar = `mtRiseBar .7s ${EASE} both`;
+
+/** Value-changed pop. Remount the node (change its key) to replay it. */
+export const pop = `mtPop .45s ${EASE} both`;
