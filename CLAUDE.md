@@ -45,7 +45,25 @@ Agent(
 
 ---
 
-## 2. Git workflow
+## 2. Part ownership — read this before editing anything
+
+Every deployable is split into two **file-disjoint tracks**, Part 1 and Part 2, so two people can work the same service simultaneously without merge conflicts. The split lives in that service's `README.md`.
+
+**Before editing any file under a service directory, this session MUST:**
+
+1. **Read that service's `README.md`** — `frontend/vayu/`, `frontend/dhanvantari/`, `backend/vayu-api/`, `backend/dhanvantari-api/`, `backend/nidana/`, `backend/simulator/`.
+2. **Establish which Part this session owns.** If the user hasn't said, **ask** — do not guess. One question, then proceed.
+3. **Edit only files inside that Part's owned globs.**
+
+**If a task appears to need a file owned by the other Part:** stop and tell the user. Do not edit it silently — the other person may have it open right now. Either the task belongs to the other Part, or the two need to coordinate.
+
+**Files marked "Shared — coordinate before editing"** (route registration, `prisma/schema.prisma`, `lib/api.ts`, `packages/contracts`, app shell/nav) are owned by **neither** Part. Where a README defines a marker-comment append convention, use it: append below the marker, never reorder or reformat what's above.
+
+See [WORKPLAN.md](WORKPLAN.md) for the full assignment table across all six deployables.
+
+---
+
+## 3. Git workflow
 
 **Never commit directly to `main`.**
 
@@ -80,7 +98,7 @@ git push origin main
 
 ---
 
-## 3. Stack & layout
+## 4. Stack & layout
 
 The repo splits **frontend / backend**. Frontends are UI-only; everything the browser must never see lives in `backend/`.
 
@@ -114,7 +132,7 @@ backend/packages/             contracts (Zod), crypto (HMAC), ui
 
 ---
 
-## 4. Non-negotiables
+## 5. Non-negotiables
 
 These are in ARCHITECTURE.md but are repeated here because they are easy to skip and expensive to retrofit:
 
@@ -127,7 +145,7 @@ These are in ARCHITECTURE.md but are repeated here because they are easy to skip
 
 ---
 
-## 5. Working rules
+## 6. Working rules
 
 - **End of every phase, the demo runs end-to-end.** Never leave a half-integrated feature overnight. §9
 - **Phase 3 (order loop) is a hard gate.** Nothing else starts until placing an order in Dhanvantari flips its status in Vayu.

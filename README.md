@@ -32,6 +32,8 @@ web/
 Each folder has its own README with a **Part 1 / Part 2** parallel-work split:
 [frontend/](frontend/README.md) · [backend/](backend/README.md)
 
+**Working in a team? Start at [WORKPLAN.md](WORKPLAN.md)** — who takes which track, in what order, and the exact prompt to paste into Claude Code.
+
 ---
 
 ## Architecture

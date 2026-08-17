@@ -6,6 +6,35 @@
 
 ---
 
+## Start here
+
+Paste one of these into Claude Code at the repo root. It reads this README, picks up your Part's owned file globs, and stays inside them.
+
+**Part 1:**
+
+```
+Read frontend/dhanvantari/README.md. I'm taking Part 1.
+Start with the inventory screen.
+```
+
+**Part 2:**
+
+```
+Read frontend/dhanvantari/README.md. I'm taking Part 2.
+Start with the incoming shipments list.
+```
+
+Branch first — never commit to `main`:
+
+```bash
+git checkout main && git pull origin main
+git checkout -b feat/<short-name>
+```
+
+See [WORKPLAN.md](../../WORKPLAN.md) for the assignment table across all six deployables.
+
+---
+
 ## 1. What this app is
 
 Dhanvantari is the institution-facing Next.js 15 App Router app (ARCHITECTURE.md §3). It renders inventory, POS/dispensing, billing, supply-order placement + one-tap reorder, incoming shipments, live shipment tracking (map + ETA + temp graph), the pre-arrival excursion warning banner, scan-in with photo evidence, complaint filing, the Supplier Scorecard, expiring-stock view, reorder suggestions, and the own-data-scope assistant (§3, §7.2 intents V1–V12).
