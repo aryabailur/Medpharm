@@ -1,52 +1,60 @@
 /**
- * Vayu design tokens — lifted verbatim from the approved dashboard mockup.
+ * MedTrack Terminal — design tokens.
  *
- * Semantic pairs: a strong colour for text/marks, a tint for its background.
- * Keep these in sync with the mockup; do not invent new hues per component.
+ * Lifted from the approved handoff ("Vayu Terminal" / "Dhanvantari Terminal").
+ * Both apps share ONE palette: warm paper surfaces, near-black ink, a single
+ * teal accent. They are told apart by their sidebar identity block and accent
+ * usage, not by different colour systems — a judge sees two windows of the same
+ * product, not two products.
  */
 
 export const C = {
-  steel: '#1D4E6F',
-  steelTint: '#E6EEF3',
+  // Surfaces — warm paper, not cool grey
+  bg: '#FBFBFA',
+  surface: '#FFFFFF',
+  surfaceAlt: '#FCFBF9',
+  raised: '#F7F5F2',
+
+  // Ink
+  ink: '#171614',
+  inkStrong: '#1A1818',
+  inkMuted: '#55524C',
+  inkFaint: '#5F5A53',
+  inkSoft: '#6B665F',
+  inkGhost: '#B3AEA6',
+
+  // Lines
+  border: '#D6D2CB',
+  borderSoft: '#EAE7E1',
+  borderFaint: '#E5E1DA',
+
+  // Accent + semantics
+  accent: '#0E7490',
+  accentTint: '#E3F0F4',
   amber: '#B45309',
   amberTint: '#FDF3E2',
   red: '#B42318',
   redTint: '#FBEAE8',
-  blue: '#175CD3',
-  blueTint: '#E7F0F9',
   green: '#186A3B',
   greenTint: '#E8F1EB',
-  grey: '#5A646B',
-  greyTint: '#EFF1F2',
-
-  // Surfaces and text
-  bg: '#F3F4F5',
-  surface: '#FFFFFF',
-  border: '#E1E4E7',
-  borderSoft: '#EDEFF1',
-  ink: '#1E2225',
-  inkMuted: '#4A555C',
-  inkFaint: '#77828A',
-  inkGhost: '#9AA4AB',
-
-  // Sidebar (dark)
-  navBg: '#12252F',
-  navBorder: '#1D3541',
-  navActive: '#1D3541',
-  navText: '#A8BEC8',
-  navTextActive: '#F2F6F8',
-  navLabel: '#5C7784',
-  navDot: '#3A5563',
-  navDotActive: '#4FA3C4',
-  navSub: '#7E98A4',
-  navKicker: '#6C8896',
+  blue: '#175CD3',
+  blueTint: '#E7F0F9',
+  grey: '#5F5A53',
+  greyTint: '#F0EFEB',
 } as const;
 
 export const FONT =
-  'Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
+  '"Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 export const MONO = '"Geist Mono", ui-monospace, "SF Mono", Menlo, monospace';
 
-/** Status → {color, tint}. Covers order, shipment, batch, complaint states. */
+/** Terminal-style section label: small, uppercase, wide tracking. */
+export const LABEL = {
+  font: `600 10px/1 ${FONT}`,
+  letterSpacing: '.14em',
+  textTransform: 'uppercase' as const,
+  color: C.inkGhost,
+};
+
 export function statusColors(status: string): { color: string; tint: string } {
   switch (status) {
     case 'APPROVED':
@@ -54,17 +62,21 @@ export function statusColors(status: string): { color: string; tint: string } {
     case 'QC_APPROVED':
     case 'PASS':
     case 'RESOLVED':
+    case 'ACCEPTED':
       return { color: C.green, tint: C.greenTint };
     case 'PENDING':
+    case 'PENDING_SYNC':
     case 'DISPATCHED':
     case 'IN_TRANSIT':
     case 'OUT_FOR_DELIVERY':
     case 'MANUFACTURED':
-      return { color: C.blue, tint: C.blueTint };
-    case 'PARTIAL':
     case 'INVESTIGATING':
+      return { color: C.accent, tint: C.accentTint };
+    case 'PARTIAL':
     case 'WAREHOUSED':
     case 'MAJOR':
+    case 'OPEN':
+    case 'LOW':
       return { color: C.amber, tint: C.amberTint };
     case 'REJECTED':
     case 'EXCEPTION':
@@ -72,15 +84,11 @@ export function statusColors(status: string): { color: string; tint: string } {
     case 'FAIL':
     case 'CRITICAL':
       return { color: C.red, tint: C.redTint };
-    case 'MINOR':
-    case 'OPEN':
-      return { color: C.steel, tint: C.steelTint };
     default:
       return { color: C.grey, tint: C.greyTint };
   }
 }
 
-/** Risk band → colour pair. */
 export function bandColors(band: string): { color: string; tint: string } {
   switch (band) {
     case 'CRITICAL':
@@ -88,8 +96,18 @@ export function bandColors(band: string): { color: string; tint: string } {
     case 'HIGH':
       return { color: C.amber, tint: C.amberTint };
     case 'MEDIUM':
-      return { color: C.blue, tint: C.blueTint };
+      return { color: C.accent, tint: C.accentTint };
     default:
       return { color: C.green, tint: C.greenTint };
   }
 }
+
+/** ₹ in lakh notation, as the handoff uses throughout. */
+export function rupees(n: number): string {
+  if (n >= 10000000) return `₹${(n / 10000000).toFixed(1)}Cr`;
+  if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
+  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}K`;
+  return `₹${Math.round(n)}`;
+}
+
+export const num = (n: number) => n.toLocaleString('en-IN');

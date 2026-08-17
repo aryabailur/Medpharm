@@ -1,33 +1,45 @@
 /**
- * Overview — KPIs and at-a-glance queues.
+ * Control — network overview for the supplier terminal.
  *
  * Every figure is computed from a live vayu-api response. Nothing here is
- * hardcoded: an empty database renders zeros, not invented numbers.
+ * hardcoded: an empty database renders zeros and <Empty>, not invented rows.
  */
 
 import Link from 'next/link';
 
-import { getComplaints, getOrders, getShipments, type Complaint, type Shipment, type SupplyOrder } from '../lib/api';
+import {
+  getAnalyticsSummary,
+  getComplaints,
+  getOrders,
+  getShipments,
+  type AnalyticsSummary,
+  type Complaint,
+  type Shipment,
+  type SupplyOrder,
+} from '../lib/api';
 import { C, FONT, MONO } from '../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, Mono, PageHeader, Pill } from '../components/ui';
+import { ApiError, Card, CardTitle, Empty, Kpi, Meter, Mono, PageHeader, Pill } from '../components/ui';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Overview() {
+export default async function Control() {
   let orders: SupplyOrder[] = [];
   let shipments: Shipment[] = [];
   let complaints: Complaint[] = [];
+  let summary: AnalyticsSummary | null = null;
   let error: string | null = null;
 
   try {
-    const [o, s, c] = await Promise.all([
+    const [o, s, c, sum] = await Promise.all([
       getOrders('?status=PENDING&take=100'),
       getShipments('?take=100'),
       getComplaints('?take=100'),
+      getAnalyticsSummary(),
     ]);
     orders = o.items;
     shipments = s.items;
     complaints = c.items;
+    summary = sum;
   } catch (e) {
     error = (e as Error).message;
   }
@@ -35,7 +47,7 @@ export default async function Overview() {
   if (error) {
     return (
       <>
-        <PageHeader title="Overview" subtitle="Manufacturer / supplier" />
+        <PageHeader title="Control" subtitle="Supplier terminal · network overview" />
         <div style={{ padding: 28 }}>
           <ApiError error={error} />
         </div>
@@ -46,22 +58,15 @@ export default async function Overview() {
   const inFlight = shipments.filter((s) =>
     ['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(s.status),
   );
-  const coldInFlight = inFlight.filter((s) => s.coldChain);
-  const withExcursion = shipments.filter((s) => s.excursionCount > 0);
   const openComplaints = complaints.filter((c) => c.status !== 'RESOLVED');
   const oldest = orders.reduce<SupplyOrder | null>(
     (a, b) => (!a || (b.ageHours ?? 0) > (a.ageHours ?? 0) ? b : a),
     null,
   );
-  const delivered = shipments.filter((s) => s.status === 'DELIVERED');
-  const onTime = delivered.filter((s) => !s.etaAt || !s.deliveredAt || s.deliveredAt <= s.etaAt);
-  const onTimePct = delivered.length
-    ? Math.round((onTime.length / delivered.length) * 100)
-    : null;
 
   return (
     <>
-      <PageHeader title="Overview" subtitle="Manufacturer / supplier" />
+      <PageHeader title="Control" subtitle="Supplier terminal · network overview" />
 
       <div style={{ padding: 28, display: 'grid', gap: 18 }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -70,44 +75,47 @@ export default async function Overview() {
             value={orders.length}
             delta={oldest ? `oldest ${oldest.ageHours}h` : undefined}
             deltaColor={(oldest?.ageHours ?? 0) >= 4 ? C.amber : C.grey}
-            note={oldest ? `${oldest.institution?.name ?? 'Unknown'}` : 'Queue is clear'}
+            note={oldest ? oldest.institution?.name ?? 'Unknown institution' : 'Queue is clear'}
           />
           <Kpi
             label="Shipments in flight"
             value={inFlight.length}
-            delta={coldInFlight.length ? `${coldInFlight.length} cold chain` : undefined}
-            deltaColor={C.blue}
-            note={
-              withExcursion.length
-                ? `${withExcursion.length} carrying an excursion`
-                : 'No excursions on record'
-            }
+            note={`${shipments.length} total on record`}
           />
           <Kpi
             label="Open complaints"
             value={openComplaints.length}
-            delta={openComplaints.length ? `${complaints.length} total` : undefined}
             deltaColor={C.amber}
-            note={`${complaints.filter((c) => c.status === 'INVESTIGATING').length} under investigation`}
+            note={`${complaints.length} total filed`}
           />
           <Kpi
-            label="On-time delivery"
-            value={onTimePct === null ? '—' : `${onTimePct}%`}
-            deltaColor={C.green}
-            note={delivered.length ? `${delivered.length} delivered` : 'No deliveries yet'}
+            label="Ledger rows"
+            value={summary ? summary.ledgerRows.toLocaleString('en-IN') : '—'}
+            note={
+              summary?.horizon.from && summary.horizon.to
+                ? `${new Date(summary.horizon.from).toLocaleDateString('en-GB')} – ${new Date(
+                    summary.horizon.to,
+                  ).toLocaleDateString('en-GB')}`
+                : 'No horizon data'
+            }
+          />
+          <Kpi
+            label="Institutions"
+            value={summary ? summary.institutions : '—'}
+            note={summary ? `${summary.facilities} facilities + ${summary.warehouses} warehouses` : undefined}
           />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 18 }}>
           <Card>
-            <CardTitle right={<Link href="/orders" style={{ font: `600 12px/1 ${FONT}` }}>Open queue →</Link>}>
+            <CardTitle right={<Link href="/orders" style={{ font: `600 12px/1 ${FONT}`, color: C.accent, textDecoration: 'none' }}>Open queue →</Link>}>
               Awaiting approval
             </CardTitle>
             {orders.length === 0 ? (
               <Empty>No orders awaiting approval.</Empty>
             ) : (
               <div>
-                {orders.slice(0, 5).map((o) => (
+                {orders.slice(0, 6).map((o) => (
                   <div
                     key={o.id}
                     style={{
@@ -125,11 +133,17 @@ export default async function Overview() {
                         <Pill label={o.status} />
                       </div>
                       <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkFaint, marginTop: 3 }}>
-                        {o.institution?.name} · {o.lines.length} line
+                        {o.institution?.name ?? 'Unknown institution'} · {o.lines.length} line
                         {o.lines.length === 1 ? '' : 's'}
                       </div>
                     </div>
-                    <div style={{ font: `500 11px/1.2 ${MONO}`, color: C.inkGhost, whiteSpace: 'nowrap' }}>
+                    <div
+                      style={{
+                        font: `500 11px/1.2 ${MONO}`,
+                        color: (o.ageHours ?? 0) >= 4 ? C.amber : C.inkGhost,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
                       {o.ageHours}h old
                     </div>
                   </div>
@@ -139,7 +153,7 @@ export default async function Overview() {
           </Card>
 
           <Card>
-            <CardTitle right={<Link href="/telemetry" style={{ font: `600 12px/1 ${FONT}` }}>Console →</Link>}>
+            <CardTitle right={<Link href="/telemetry" style={{ font: `600 12px/1 ${FONT}`, color: C.accent, textDecoration: 'none' }}>Console →</Link>}>
               In flight
             </CardTitle>
             {inFlight.length === 0 ? (
@@ -153,19 +167,20 @@ export default async function Overview() {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
+                      gap: 12,
                       padding: '11px 16px',
                       borderBottom: `1px solid ${C.borderSoft}`,
                     }}
                   >
                     <Mono>{s.id.slice(0, 8)}</Mono>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ font: `500 11px/1 ${MONO}`, color: C.inkFaint }}>
-                        {s.progressPct != null ? `${Math.round(s.progressPct * 100)}%` : '—'}
-                      </span>
+                      <Meter pct={(s.progressPct ?? 0) * 100} />
                       <span
                         style={{
                           font: `600 11px/1 ${MONO}`,
-                          color: s.coldChain ? C.blue : C.grey,
+                          color: s.coldChain ? C.accent : C.inkGhost,
+                          minWidth: 56,
+                          textAlign: 'right',
                         }}
                       >
                         {s.lastTempC != null ? `${s.lastTempC.toFixed(1)} °C` : 'ambient'}

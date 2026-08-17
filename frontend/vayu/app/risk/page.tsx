@@ -1,20 +1,16 @@
 'use client';
 
 /**
- * Risk + Demand Forecast — multi-signal stockout risk, every flag drillable.
- *
- * There is no direct /api/risk endpoint on vayu-api: the risk model lives
- * behind the assistant, which assembles the same evidence bundle it narrates
- * from. We call askAssistant with a fixed natural-language question and read
- * evidence.data back out as structured rows — the UI never touches the LLM
- * output for anything but the (unused, here) prose answer.
+ * Risk + Forecast — stockout risk scoring and next-period demand forecast,
+ * both surfaced through the assistant's evidence-bundle endpoint.
  */
 
 import { useEffect, useState } from 'react';
 
 import { askAssistant } from '../../lib/api';
 import { C, FONT, MONO, bandColors } from '../../lib/theme';
-import { ApiError, Card, Empty, Kpi, PageHeader, Pill } from '../../components/ui';
+import { ApiError, Card, Empty, Kpi, PageHeader } from '../../components/ui';
+import { Sparkline } from '../../components/charts';
 
 interface RiskSignal {
   name: string;
@@ -32,334 +28,350 @@ interface RiskRow {
   band: string;
   confidence: 'high' | 'medium' | 'low' | string;
   signals: RiskSignal[];
-  source: 'nidana' | 'fallback' | string;
-}
-
-function humanise(name: string): string {
-  return name.replace(/_/g, ' ');
-}
-
-interface ForecastHistoryPoint {
-  period: string;
-  dispensed: number;
+  source: string;
 }
 
 interface ForecastDriver {
   label: string;
-  direction: 'up' | 'down';
+  direction: 'RISING' | 'FALLING' | string;
   magnitude: number;
-}
-
-interface ForecastMetrics {
-  mape: number | null;
-  band_coverage_pct: number | null;
-  band_coverage_target_pct: number | null;
-  train_rows: number | null;
-  holdout_rows: number | null;
 }
 
 interface ForecastRow {
   institution: string;
-  district: string | null;
+  district: string;
   drug: string;
-  history: ForecastHistoryPoint[];
+  history: Array<{ period: string; dispensed: number }>;
   point: number;
   p10: number;
   p90: number;
   drivers: ForecastDriver[];
   lastActual: number;
   changePct: number | null;
-  source: 'nidana' | 'fallback' | string;
-  metrics: ForecastMetrics | null;
+  source: string;
+  metrics: {
+    mape: number;
+    band_coverage_pct: number;
+    band_coverage_target_pct: number;
+    train_rows: number;
+    holdout_rows: number;
+  } | null;
 }
 
-/** Sparkline + forecast band, plain SVG. Guards against a flat series. */
-function ForecastSparkline({ row }: { row: ForecastRow }) {
-  const values = row.history.map((h) => h.dispensed);
-  const allValues = [...values, row.p10, row.p90];
-  const min = Math.min(...allValues);
-  const max = Math.max(...allValues);
-  const range = max - min;
-
-  const historyX = (i: number) => (values.length > 1 ? (i / (values.length - 1)) * 290 : 0);
-  const y = (v: number) => (range === 0 ? 32 : 64 - ((v - min) / range) * 64);
-
-  const points = values.map((v, i) => `${historyX(i)},${y(v)}`).join(' ');
-  const p10Y = y(row.p10);
-  const p90Y = y(row.p90);
-  const pointY = y(row.point);
-
-  return (
-    <svg width="100%" height={64} viewBox="0 0 300 64" preserveAspectRatio="none">
-      <line x1={290} y1={0} x2={290} y2={64} stroke={C.border} strokeWidth={1} />
-      <rect x={290} y={Math.min(p10Y, p90Y)} width={10} height={Math.max(1, Math.abs(p90Y - p10Y))} fill={C.blueTint} />
-      {values.length > 0 && <polyline points={points} fill="none" stroke={C.steel} strokeWidth={1.5} />}
-      <circle cx={295} cy={pointY} r={3} fill={C.blue} />
-    </svg>
-  );
+function labelize(name: string): string {
+  return name.replace(/_/g, ' ');
 }
 
 export default function RiskPage() {
-  const [rows, setRows] = useState<RiskRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [riskData, setRiskData] = useState<RiskRow[] | null>(null);
+  const [riskError, setRiskError] = useState<string | null>(null);
+  const [forecastData, setForecastData] = useState<ForecastRow[] | null>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
 
-  const [forecastRows, setForecastRows] = useState<ForecastRow[] | null>(null);
-  const [forecastError, setForecastError] = useState<string | null>(null);
-  const [forecastLoading, setForecastLoading] = useState(true);
-
   useEffect(() => {
-    void (async () => {
+    (async () => {
       try {
         const res = await askAssistant('where are we about to stock out');
-        const data = res.evidence?.data;
-        setRows(Array.isArray(data) ? (data as RiskRow[]) : []);
+        setRiskData((res.evidence.data as RiskRow[]) ?? []);
       } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
+        setRiskError((e as Error).message);
       }
     })();
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
+    (async () => {
       try {
         const res = await askAssistant('what will we need next month');
-        const data = res.evidence?.data;
-        setForecastRows(Array.isArray(data) ? (data as ForecastRow[]) : []);
+        setForecastData((res.evidence.data as ForecastRow[]) ?? []);
       } catch (e) {
         setForecastError((e as Error).message);
-      } finally {
-        setForecastLoading(false);
       }
     })();
   }, []);
 
-  const critical = rows?.filter((r) => r.band === 'CRITICAL').length ?? 0;
-  const high = rows?.filter((r) => r.band === 'HIGH').length ?? 0;
-  const highConfidence = rows?.filter((r) => r.confidence === 'high').length ?? 0;
+  const rows = (riskData ?? []).slice(0, 8);
+  const critical = (riskData ?? []).filter((r) => r.band === 'CRITICAL').length;
+  const high = (riskData ?? []).filter((r) => r.band === 'HIGH').length;
+  const highConfidence = (riskData ?? []).filter((r) => r.confidence === 'high').length;
+
+  const forecastRows = (forecastData ?? []).slice(0, 6);
 
   return (
     <>
-      <PageHeader title="Risk + Demand Forecast" subtitle="Multi-signal stockout risk, every flag drillable" />
+      <PageHeader title="Risk + Forecast" subtitle="Stockout risk scoring and next-period demand" />
 
-      <div style={{ padding: 28, display: 'grid', gap: 18 }}>
-        {error ? (
-          <ApiError error={error} />
-        ) : loading ? (
-          <Card style={{ padding: 18 }}>
-            <div style={{ font: `400 13px/1.5 ${FONT}`, color: C.inkFaint }}>Loading risk signals…</div>
-          </Card>
-        ) : !rows || rows.length === 0 ? (
-          <Card>
-            <Empty>No institution is at elevated stockout risk.</Empty>
-          </Card>
-        ) : (
-          <>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <Kpi label="Flagged" value={rows.length} />
-              <Kpi label="Critical" value={critical} deltaColor={C.red} />
-              <Kpi label="High" value={high} deltaColor={C.amber} />
-              <Kpi label="High confidence" value={highConfidence} note={`of ${rows.length}`} />
-            </div>
+      <div style={{ padding: 28, display: 'grid', gap: 28 }}>
+        <section style={{ display: 'grid', gap: 14 }}>
+          <div style={{ font: `600 13px/1.3 ${FONT}`, color: C.ink }}>Stockout Risk</div>
 
-            <div style={{ display: 'grid', gap: 12 }}>
-              {rows.map((row, i) => {
-                const band = bandColors(row.band);
-                const isOpen = expanded === i;
-                return (
-                  <Card key={`${row.institution}-${row.drug}-${i}`} style={{ overflow: 'hidden' }}>
-                    <button
-                      onClick={() => setExpanded(isOpen ? null : i)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        width: '100%',
-                        padding: '14px 16px',
-                        border: 0,
-                        background: 'transparent',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        gap: 12,
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ font: `600 13px/1.4 ${FONT}`, color: C.ink }}>{row.institution}</div>
-                        <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkFaint, marginTop: 2 }}>
-                          {row.district} · {row.drug}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                        <span
+          {riskError ? (
+            <ApiError error={riskError} />
+          ) : riskData === null ? (
+            <Empty>Loading…</Empty>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <Kpi label="Flagged" value={riskData.length} />
+                <Kpi label="Critical" value={critical} deltaColor={critical ? C.red : C.grey} />
+                <Kpi label="High" value={high} deltaColor={high ? C.amber : C.grey} />
+                <Kpi label="High confidence" value={highConfidence} deltaColor={C.accent} />
+              </div>
+
+              {rows.length === 0 ? (
+                <Empty>No stockout risk detected.</Empty>
+              ) : (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {rows.map((r, i) => {
+                    const bc = bandColors(r.band);
+                    const isOpen = expanded === i;
+                    return (
+                      <Card key={i} style={{ padding: 0 }}>
+                        <button
+                          onClick={() => setExpanded(isOpen ? null : i)}
                           style={{
-                            padding: '2px 7px',
-                            borderRadius: 6,
-                            background: C.greyTint,
-                            color: C.inkFaint,
-                            font: `600 10px/1.4 ${FONT}`,
-                            textTransform: 'uppercase',
+                            display: 'flex',
+                            width: '100%',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            padding: '12px 16px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            textAlign: 'left',
                           }}
                         >
-                          {row.confidence} confidence
-                        </span>
-                        <span style={{ font: `600 20px/1 ${MONO}`, color: band.color }}>{row.score.toFixed(2)}</span>
-                        <Pill label={row.band} color={band.color} tint={band.tint} />
-                      </div>
-                    </button>
-
-                    {isOpen && (
-                      <div style={{ padding: '4px 16px 16px', borderTop: `1px solid ${C.borderSoft}` }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '10px 0' }}>
-                          <div style={{ font: `600 10px/1.4 ${FONT}`, color: C.inkGhost, textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                            Signals
+                          <div>
+                            <div style={{ font: `600 13px/1.3 ${FONT}`, color: C.ink }}>{r.institution}</div>
+                            <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkSoft, marginTop: 2 }}>
+                              {r.district} · {r.drug}
+                            </div>
                           </div>
-                          <span
-                            style={{
-                              padding: '2px 7px',
-                              borderRadius: 6,
-                              background: C.greyTint,
-                              color: C.inkFaint,
-                              font: `600 10px/1.2 ${MONO}`,
-                            }}
-                          >
-                            source: {row.source}
-                          </span>
-                        </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <span style={{ font: `500 20px/1 ${MONO}`, color: C.ink }}>{r.score.toFixed(2)}</span>
+                            <span
+                              style={{
+                                padding: '2px 7px',
+                                borderRadius: 3,
+                                background: bc.tint,
+                                color: bc.color,
+                                font: `600 10px/1.5 ${MONO}`,
+                                letterSpacing: '.04em',
+                              }}
+                            >
+                              {r.band}
+                            </span>
+                            <span
+                              style={{
+                                padding: '2px 7px',
+                                borderRadius: 3,
+                                background: C.greyTint,
+                                color: C.inkSoft,
+                                font: `500 10px/1.5 ${FONT}`,
+                              }}
+                            >
+                              {r.confidence} confidence
+                            </span>
+                          </div>
+                        </button>
 
-                        <div style={{ display: 'grid', gap: 12 }}>
-                          {row.signals.map((s) => {
-                            const pct = s.weight ? Math.max(0, Math.min(100, (s.contribution / s.weight) * 100)) : 0;
-                            return (
-                              <div key={s.name}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                                  <span style={{ font: `600 12px/1.4 ${FONT}`, color: C.inkMuted, textTransform: 'capitalize' }}>
-                                    {humanise(s.name)}
-                                  </span>
-                                  <span style={{ font: `500 11px/1.4 ${MONO}`, color: C.inkFaint }}>{s.value}</span>
-                                </div>
-                                <div style={{ background: C.steelTint, borderRadius: 4, height: 6, marginTop: 5, overflow: 'hidden' }}>
-                                  <div style={{ width: `${pct}%`, background: C.steel, height: '100%', borderRadius: 4 }} />
-                                </div>
-                                <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkFaint, marginTop: 4 }}>
-                                  {s.explanation}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        {isOpen && (
+                          <div style={{ padding: '4px 16px 16px', borderTop: `1px solid ${C.borderSoft}` }}>
+                            <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
+                              {r.signals.map((s, j) => {
+                                const pct = s.weight !== 0 ? Math.max(0, Math.min(1, s.contribution / s.weight)) : 0;
+                                return (
+                                  <div key={j}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                                      <span style={{ font: `500 11px/1.4 ${FONT}`, color: C.inkMuted, textTransform: 'capitalize' }}>
+                                        {labelize(s.name)}
+                                      </span>
+                                      <span style={{ font: `500 11px/1.4 ${MONO}`, color: C.ink }}>{s.value}</span>
+                                    </div>
+                                    <div style={{ background: C.borderSoft, height: 5, marginTop: 4 }}>
+                                      <div style={{ width: `${pct * 100}%`, height: '100%', background: C.accent }} />
+                                    </div>
+                                    <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkGhost, marginTop: 3 }}>
+                                      {s.explanation}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost, marginTop: 12 }}>
+                              Confidence is signal agreement: high when at least 3 of 5 signals point the same way,
+                              medium at 2, low at 1.
+                            </div>
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                marginTop: 8,
+                                padding: '2px 7px',
+                                borderRadius: 3,
+                                background: C.greyTint,
+                                color: C.inkSoft,
+                                font: `500 10px/1.5 ${MONO}`,
+                              }}
+                            >
+                              source: {r.source}
+                            </span>
+                          </div>
+                        )}
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </section>
 
-                        <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkFaint, marginTop: 12 }}>
-                          Confidence is signal agreement: high when at least 3 of 5 signals point the same way,
-                          medium at 2, low at 1.
-                        </div>
-                      </div>
-                    )}
-                  </Card>
-                );
-              })}
+        <section style={{ display: 'grid', gap: 14 }}>
+          <div>
+            <div style={{ font: `600 13px/1.3 ${FONT}`, color: C.ink }}>Demand Forecast</div>
+            <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 4 }}>
+              Next-period demand with an 80% confidence band. Drivers are SHAP attributions, translated.
             </div>
-          </>
-        )}
-
-        <div>
-          <div style={{ font: `600 15px/1.3 ${FONT}`, color: C.ink, marginTop: 28, marginBottom: 12 }}>
-            Demand Forecast
-          </div>
-          <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkFaint, marginTop: -8, marginBottom: 12 }}>
-            Next-period demand with an 80% confidence band. Drivers are SHAP attributions, translated.
           </div>
 
           {forecastError ? (
             <ApiError error={forecastError} />
-          ) : forecastLoading ? (
-            <Card style={{ padding: 18 }}>
-              <div style={{ font: `400 13px/1.5 ${FONT}`, color: C.inkFaint }}>Loading demand forecast…</div>
-            </Card>
-          ) : !forecastRows || forecastRows.length === 0 ? (
-            <Card>
-              <Empty>No forecast data is available.</Empty>
-            </Card>
+          ) : forecastData === null ? (
+            <Empty>Loading…</Empty>
+          ) : forecastRows.length === 0 ? (
+            <Empty>No forecast data available.</Empty>
           ) : (
-            <>
-              <div style={{ display: 'grid', gap: 12 }}>
-                {forecastRows.slice(0, 6).map((row, i) => {
-                  const rising = row.changePct !== null && row.changePct > 0;
-                  const chipColor = row.changePct === null ? C.inkFaint : rising ? C.amber : C.green;
-                  const chipTint = row.changePct === null ? C.greyTint : rising ? C.amberTint : C.greenTint;
-                  return (
-                    <Card key={`${row.institution}-${row.drug}-${i}`} style={{ padding: 16 }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ font: `600 14px/1.4 ${FONT}`, color: C.ink }}>{row.drug}</div>
-                          <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkFaint, marginTop: 2 }}>
-                            {row.institution} · {row.district ?? 'Unknown district'}
-                          </div>
-                        </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <div style={{ font: `600 22px/1 ${FONT}`, color: C.ink }}>{row.point}</div>
-                          <div style={{ font: `400 11px/1.4 ${MONO}`, color: C.inkFaint, marginTop: 4 }}>
-                            {row.p10} – {row.p90}
-                          </div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {forecastRows.map((f, i) => (
+                <Card key={i} style={{ padding: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ font: `600 13px/1.3 ${FONT}`, color: C.ink }}>{f.drug}</div>
+                      <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkSoft, marginTop: 2 }}>{f.institution}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                        <span style={{ font: `500 20px/1 ${MONO}`, color: C.ink }}>{f.point}</span>
+                        {f.changePct == null ? (
+                          <span style={{ font: `500 10px/1.5 ${MONO}`, color: C.inkGhost }}>—</span>
+                        ) : (
                           <span
                             style={{
-                              display: 'inline-block',
-                              marginTop: 6,
                               padding: '2px 7px',
-                              borderRadius: 6,
-                              background: chipTint,
-                              color: chipColor,
-                              font: `600 10px/1.4 ${MONO}`,
+                              borderRadius: 3,
+                              background: f.changePct > 0 ? C.amberTint : C.greenTint,
+                              color: f.changePct > 0 ? C.amber : C.green,
+                              font: `600 10px/1.5 ${MONO}`,
                             }}
                           >
-                            {row.changePct === null ? '—' : `${row.changePct > 0 ? '+' : ''}${row.changePct.toFixed(1)}%`}
+                            {f.changePct > 0 ? '+' : ''}
+                            {f.changePct.toFixed(1)}%
                           </span>
-                        </div>
+                        )}
                       </div>
-
-                      <div style={{ marginTop: 12 }}>
-                        <ForecastSparkline row={row} />
+                      <div style={{ font: `500 11px/1.4 ${MONO}`, color: C.inkSoft, marginTop: 3 }}>
+                        {f.p10} – {f.p90}
                       </div>
+                    </div>
+                  </div>
 
-                      {row.drivers.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-                          {row.drivers.map((d, di) => (
-                            <span
-                              key={`${d.label}-${di}`}
-                              style={{
-                                padding: '3px 8px',
-                                borderRadius: 6,
-                                background: C.greyTint,
-                                color: C.inkMuted,
-                                font: `400 11px/1.4 ${FONT}`,
-                              }}
-                            >
-                              {d.direction === 'up' ? '↑' : '↓'} {d.label}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                  <div style={{ marginTop: 12 }}>
+                    <ForecastTrend history={f.history} point={f.point} p10={f.p10} p90={f.p90} />
+                  </div>
 
-                      <div style={{ font: `400 11px/1.5 ${MONO}`, color: C.inkGhost, marginTop: 10 }}>
-                        {row.metrics && row.metrics.train_rows !== null
-                          ? `MAPE ${row.metrics.mape}% · band coverage ${row.metrics.band_coverage_pct}% of ${row.metrics.band_coverage_target_pct}% target · ${row.metrics.train_rows} train / ${row.metrics.holdout_rows} holdout · lightgbm`
-                          : 'rolling-mean fallback · insufficient history to train'}
-                      </div>
-                    </Card>
-                  );
-                })}
+                  {f.drivers.length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                      {f.drivers.map((d, j) => (
+                        <span
+                          key={j}
+                          style={{
+                            padding: '2px 8px',
+                            background: C.greyTint,
+                            color: C.inkMuted,
+                            font: `500 10px/1.6 ${FONT}`,
+                            borderRadius: 3,
+                          }}
+                        >
+                          {d.direction === 'RISING' ? '↑' : d.direction === 'FALLING' ? '↓' : '•'} {d.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ font: `400 10px/1.5 ${MONO}`, color: C.inkGhost, marginTop: 10 }}>
+                    {f.metrics ? (
+                      <>
+                        MAPE {f.metrics.mape}% · coverage {f.metrics.band_coverage_pct}% of{' '}
+                        {f.metrics.band_coverage_target_pct}% · {f.metrics.train_rows} train / {f.metrics.holdout_rows}{' '}
+                        holdout · lightgbm
+                      </>
+                    ) : (
+                      <>rolling-mean fallback · insufficient history to train</>
+                    )}
+                  </div>
+                </Card>
+              ))}
+              <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost }}>
+                Coverage is reported as measured, not tuned. On a short, strongly-trended series it varies — the row
+                counts show why.
               </div>
-
-              <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkFaint, marginTop: 12 }}>
-                Coverage is reported as measured, not tuned. On a short, strongly-trended series it varies —
-                the row counts show why.
-              </div>
-            </>
+            </div>
           )}
-        </div>
+        </section>
       </div>
     </>
+  );
+}
+
+function ForecastTrend({
+  history,
+  point,
+  p10,
+  p90,
+}: {
+  history: Array<{ period: string; dispensed: number }>;
+  point: number;
+  p10: number;
+  p90: number;
+}) {
+  const values = history.map((h) => h.dispensed);
+  if (values.length === 0) {
+    return <Sparkline values={[point]} width={200} height={40} />;
+  }
+
+  const W = 280;
+  const H = 48;
+  const histW = 190;
+  const bandW = W - histW - 10;
+  const padY = 6;
+
+  const allValues = [...values, p10, p90, point];
+  const min = Math.min(...allValues);
+  const max = Math.max(...allValues);
+  const span = max - min || 1;
+  const scaleY = (v: number) => padY + (H - padY * 2) - ((v - min) / span) * (H - padY * 2);
+
+  const n = values.length;
+  const xAt = (i: number) => (n === 1 ? histW / 2 : (i / (n - 1)) * histW);
+  const linePoints = values.map((v, i) => `${xAt(i)},${scaleY(v)}`).join(' ');
+  const bandX = histW + 10;
+
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <line x1={histW + 5} x2={histW + 5} y1={0} y2={H} stroke={C.borderSoft} strokeWidth={1} />
+      {n === 1 ? (
+        <circle cx={xAt(0)} cy={scaleY(values[0])} r={2} fill={C.accent} />
+      ) : (
+        <polyline points={linePoints} fill="none" stroke={C.accent} strokeWidth={1.5} />
+      )}
+      <rect
+        x={bandX}
+        y={scaleY(p90)}
+        width={bandW}
+        height={Math.max(scaleY(p10) - scaleY(p90), 1)}
+        fill={C.accent}
+        opacity={0.15}
+      />
+      <line x1={bandX} x2={bandX + bandW} y1={scaleY(point)} y2={scaleY(point)} stroke={C.ink} strokeWidth={1.5} />
+    </svg>
   );
 }
