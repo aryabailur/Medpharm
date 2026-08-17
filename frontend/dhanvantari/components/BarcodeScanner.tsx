@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useId } from "react"
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode"
 import { C, FONT } from "../lib/theme"
 
@@ -12,6 +12,9 @@ interface BarcodeScannerProps {
 type ScannerState = "initializing" | "scanning" | "permission_denied" | "no_camera" | "error"
 
 export default function BarcodeScanner({ onScanSuccess, onScanFailure }: BarcodeScannerProps) {
+  const reactId = useId().replace(/:/g, "_");
+  const readerId = `barcode-reader-${reactId}`;
+  
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<ScannerState>("initializing");
@@ -38,17 +41,35 @@ export default function BarcodeScanner({ onScanSuccess, onScanFailure }: Barcode
 
   useEffect(() => {
     mountedRef.current = true;
-    let scanner: Html5Qrcode | null = null;
+    let isCleanedUp = false;
 
     const startScanner = async () => {
       // Small delay for React Strict Mode double-mount
-      await new Promise(r => setTimeout(r, 150));
-      if (!mountedRef.current) return;
+      await new Promise(r => setTimeout(r, 200));
+      if (!mountedRef.current || isCleanedUp) return;
 
-      const readerId = "barcode-reader-region-dhanvantari";
+      // Clean container DOM if any stale elements exist from previous runs
+      if (containerRef.current) {
+        containerRef.current.innerHTML = "";
+      }
+
+      // Stop & clear any previous scanner instance
+      if (scannerRef.current) {
+        try {
+          if (scannerRef.current.isScanning) {
+            await scannerRef.current.stop();
+          }
+          scannerRef.current.clear();
+        } catch {
+          // ignore cleanup errors
+        }
+        scannerRef.current = null;
+      }
+
+      if (!mountedRef.current || isCleanedUp) return;
 
       try {
-        scanner = new Html5Qrcode(readerId, {
+        const scanner = new Html5Qrcode(readerId, {
           formatsToSupport: [
             Html5QrcodeSupportedFormats.EAN_13,
             Html5QrcodeSupportedFormats.EAN_8,
@@ -68,8 +89,8 @@ export default function BarcodeScanner({ onScanSuccess, onScanFailure }: Barcode
           {
             fps: 15,
             qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-              const width = Math.min(Math.floor(viewfinderWidth * 0.85), 400);
-              const height = Math.min(Math.floor(viewfinderHeight * 0.35), 160);
+              const width = Math.min(Math.floor(viewfinderWidth * 0.85), 360);
+              const height = Math.min(Math.floor(viewfinderHeight * 0.45), 180);
               return { width, height };
             },
             aspectRatio: 1.333,
@@ -81,11 +102,19 @@ export default function BarcodeScanner({ onScanSuccess, onScanFailure }: Barcode
           }
         );
 
-        if (mountedRef.current) {
+        if (mountedRef.current && !isCleanedUp) {
           setState("scanning");
+        } else {
+          // Unmounted while starting
+          try {
+            if (scanner.isScanning) {
+              await scanner.stop();
+            }
+            scanner.clear();
+          } catch {}
         }
       } catch (err: unknown) {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || isCleanedUp) return;
 
         const msg = typeof err === "string" ? err : (err as Error)?.message || "";
         console.error("BarcodeScanner: start failed:", msg);
@@ -111,18 +140,25 @@ export default function BarcodeScanner({ onScanSuccess, onScanFailure }: Barcode
       }
     };
 
-    startScanner();
+    void startScanner();
 
     return () => {
+      isCleanedUp = true;
       mountedRef.current = false;
-      if (scanner) {
-        const s = scanner;
-        scannerRef.current = null;
-        s.stop().catch((e) => console.error("BarcodeScanner: stop failed:", e));
+      const s = scannerRef.current;
+      scannerRef.current = null;
+      if (s) {
+        s.stop()
+          .then(() => {
+            try { s.clear(); } catch {}
+          })
+          .catch(() => {
+            try { s.clear(); } catch {}
+          });
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [readerId]);
 
   const errorTitle =
     state === "permission_denied" ? "Camera Permission Required" :
@@ -200,6 +236,7 @@ export default function BarcodeScanner({ onScanSuccess, onScanFailure }: Barcode
           justifyContent: "center",
           background: "rgba(255,255,255,0.92)",
           gap: 8,
+          minHeight: 220,
         }}>
           <div style={{
             width: 24,
@@ -238,21 +275,23 @@ export default function BarcodeScanner({ onScanSuccess, onScanFailure }: Barcode
       )}
 
       <style dangerouslySetInnerHTML={{ __html: `
-        #barcode-reader-region-dhanvantari { border: none !important; background: transparent !important; padding: 0 !important; }
-        #barcode-reader-region-dhanvantari video { border-radius: 8px !important; }
-        #barcode-reader-region-dhanvantari img[alt="Info icon"] { display: none !important; }
-        #barcode-reader-region-dhanvantari__dashboard_section,
-        #barcode-reader-region-dhanvantari__dashboard_section_csr,
-        #barcode-reader-region-dhanvantari__dashboard_section_swaplink,
-        #barcode-reader-region-dhanvantari__header_message,
-        #barcode-reader-region-dhanvantari button,
-        #barcode-reader-region-dhanvantari select { display: none !important; }
-        #barcode-reader-region-dhanvantari__scan_region { position: relative !important; }
-        #barcode-reader-region-dhanvantari__scan_region > img { display: none !important; }
+        #${readerId} { border: none !important; background: transparent !important; padding: 0 !important; overflow: hidden !important; }
+        #${readerId} video { border-radius: 8px !important; width: 100% !important; max-height: 280px !important; object-fit: cover !important; display: block !important; }
+        #${readerId} video:not(:last-of-type) { display: none !important; }
+        #${readerId} canvas { border-radius: 8px !important; }
+        #${readerId} img[alt="Info icon"] { display: none !important; }
+        #${readerId}__dashboard_section,
+        #${readerId}__dashboard_section_csr,
+        #${readerId}__dashboard_section_swaplink,
+        #${readerId}__header_message,
+        #${readerId} button,
+        #${readerId} select { display: none !important; }
+        #${readerId}__scan_region { position: relative !important; }
+        #${readerId}__scan_region > img { display: none !important; }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
       `}} />
-      <div id="barcode-reader-region-dhanvantari" ref={containerRef} style={{ width: "100%", position: "relative" }} />
+      <div id={readerId} ref={containerRef} style={{ width: "100%", minHeight: 220, position: "relative" }} />
     </div>
   );
 }
