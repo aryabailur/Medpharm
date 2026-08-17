@@ -13,6 +13,10 @@
 
 generator client {
   provider = "prisma-client-js"
+  // Each API server generates its own client. Without separate output paths
+  // both schemas write to node_modules/.prisma/client and whichever ran
+  // `prisma generate` last silently overwrites the other server's models.
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
