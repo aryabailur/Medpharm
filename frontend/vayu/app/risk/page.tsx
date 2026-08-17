@@ -70,22 +70,33 @@ export default function RiskPage() {
   const [expanded, setExpanded] = useState<number | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       try {
         const res = await askAssistant('where are we about to stock out');
-        setRiskData((res.evidence.data as RiskRow[]) ?? []);
+        if (!cancelled) setRiskData((res.evidence.data as RiskRow[]) ?? []);
       } catch (e) {
-        setRiskError((e as Error).message);
+        if (!cancelled) setRiskError((e as Error).message);
       }
-    })();
-    (async () => {
+
+      // Forecast trains a LightGBM model (point + two quantile regressors)
+      // per pair and is genuinely slow no matter how few pairs are asked
+      // for — firing it in parallel with risk just makes both sections sit
+      // on "Loading…" together. Fetch it lazily, after risk has already
+      // rendered, so the page shows something in under a second.
+      if (cancelled) return;
       try {
         const res = await askAssistant('what will we need next month');
-        setForecastData((res.evidence.data as ForecastRow[]) ?? []);
+        if (!cancelled) setForecastData((res.evidence.data as ForecastRow[]) ?? []);
       } catch (e) {
-        setForecastError((e as Error).message);
+        if (!cancelled) setForecastError((e as Error).message);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const rows = (riskData ?? []).slice(0, 8);
@@ -358,7 +369,7 @@ function ForecastTrend({
   const bandX = histW + 10;
 
   return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
       <line x1={histW + 5} x2={histW + 5} y1={0} y2={H} stroke={C.borderSoft} strokeWidth={1} />
       {n === 1 ? (
         <circle cx={xAt(0)} cy={scaleY(values[0])} r={2} fill={C.accent} />

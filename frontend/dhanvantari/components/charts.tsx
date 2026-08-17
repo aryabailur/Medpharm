@@ -87,7 +87,7 @@ export function LineChart({
           {max.toFixed(1)}
           {yLabel ? ` ${yLabel}` : ''}
         </text>
-        <text x={padL} y={H - 4} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+        <text x={padL} y={padT + innerH + 9} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
           {min.toFixed(1)}
           {yLabel ? ` ${yLabel}` : ''}
         </text>
@@ -178,7 +178,7 @@ export function MultiLineChart({
           <text x={padL} y={padT - 2} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
             {max.toFixed(1)}
           </text>
-          <text x={padL} y={H - 4} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+          <text x={padL} y={padT + innerH + 9} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
             {min.toFixed(1)}
           </text>
           <text x={padL} y={H - 2} textAnchor="start" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
