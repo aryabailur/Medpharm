@@ -22,7 +22,7 @@ import {
   type TelemetryPoint,
 } from '../../lib/api';
 import { C, FONT, MONO } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, Mono, PageHeader, Pill } from '../../components/ui';
+import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Pill } from '../../components/ui';
 
 const MIN_C = 2;
 const MAX_C = 8;
@@ -163,7 +163,7 @@ function Inner() {
 
   return (
     <>
-      <PageHeader title="Telemetry + Excursions" subtitle="Live position and temperature from the cold chain" />
+      <PageHeader title="Telemetry + Excursions" />
       <div style={{ display: 'flex', minHeight: 'calc(100vh - 73px)' }}>
         <div style={{ width: 250, flex: '0 0 250px', borderRight: `1px solid ${C.border}`, overflowY: 'auto' }}>
           <CardTitle>Shipments</CardTitle>
@@ -208,16 +208,22 @@ function Inner() {
           )}
         </div>
 
-        <div style={{ flex: 1, padding: 28, display: 'grid', gap: 18, alignContent: 'start' }}>
+        <div style={{ flex: 1, display: 'grid', alignContent: 'start' }}>
           {!selectedId ? (
-            <Empty>Select a shipment.</Empty>
+            <div style={{ padding: 26 }}>
+              <Empty>Select a shipment.</Empty>
+            </div>
           ) : detailError ? (
-            <ApiError error={detailError} />
+            <div style={{ padding: 26 }}>
+              <ApiError error={detailError} />
+            </div>
           ) : !detail ? (
-            <Empty>Loading…</Empty>
+            <div style={{ padding: 26 }}>
+              <Empty>Loading…</Empty>
+            </div>
           ) : (
             <>
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <KpiBand columns={4}>
                 <Kpi
                   label="Current temp"
                   value={detail.coldChain ? (detail.lastTempC != null ? `${detail.lastTempC.toFixed(1)}°C` : '—') : 'ambient'}
@@ -232,18 +238,20 @@ function Inner() {
                   value={detail.excursionCount}
                   deltaColor={detail.excursionCount > 0 ? C.red : C.grey}
                 />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
-                  {live && (
-                    <>
-                      <span style={{ width: 6, height: 6, background: C.green, display: 'inline-block' }} />
-                      <span style={{ font: `600 10px/1 ${MONO}`, color: C.green, letterSpacing: '.06em' }}>LIVE</span>
-                      <span style={{ font: `400 10px/1 ${MONO}`, color: C.inkGhost }}>{eventCount} events</span>
-                    </>
-                  )}
-                </div>
+              </KpiBand>
+
+              <div style={{ padding: '26px 26px 0', display: 'flex', justifyContent: 'flex-end' }}>
+                {live && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 6, height: 6, background: C.green, display: 'inline-block' }} />
+                    <span style={{ font: `600 10px/1 ${MONO}`, color: C.green, letterSpacing: '.06em' }}>LIVE</span>
+                    <span style={{ font: `400 10px/1 ${MONO}`, color: C.inkGhost }}>{eventCount} events</span>
+                  </div>
+                )}
               </div>
 
-              <Card>
+              <div style={{ padding: 26, display: 'grid', gap: 18 }}>
+              <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
                 <CardTitle>Temperature trace</CardTitle>
                 <div style={{ padding: 14 }}>
                   <TemperatureChart points={points} />
@@ -302,6 +310,7 @@ function Inner() {
                   </table>
                 )}
               </Card>
+              </div>
             </>
           )}
         </div>

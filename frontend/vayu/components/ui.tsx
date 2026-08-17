@@ -96,7 +96,28 @@ export function Pill({ label, color, tint }: { label: string; color?: string; ti
   );
 }
 
-/** Figures are monospace so columns align — the terminal read. */
+/**
+ * Edge-to-edge KPI band — the handoff's signature element.
+ *
+ * Not cards in a row: a single grid flush to the page edges, hairline dividers
+ * between cells, 44px tabular figures. Wrap Kpi children in this.
+ */
+export function KpiBand({ children, columns = 5 }: { children: ReactNode; columns?: number }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+        background: C.surface,
+        borderBottom: `1px solid ${C.border}`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** One cell of the KPI band. Figures are monospace and tabular so they align. */
 export function Kpi({
   label,
   value,
@@ -111,16 +132,29 @@ export function Kpi({
   note?: string;
 }) {
   return (
-    <Card style={{ padding: '12px 14px', flex: '1 1 190px', minWidth: 180 }}>
+    <div style={{ padding: '26px 26px 24px', borderRight: `1px solid ${C.borderFaint}` }}>
       <div style={LABEL}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8 }}>
-        <div style={{ font: `500 24px/1 ${MONO}`, color: C.ink, letterSpacing: '-0.02em' }}>{value}</div>
-        {delta && <div style={{ font: `600 11px/1 ${FONT}`, color: deltaColor ?? C.inkSoft }}>{delta}</div>}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 9, marginTop: 14 }}>
+        <span
+          style={{
+            font: `600 44px/1 ${MONO}`,
+            letterSpacing: '-.04em',
+            fontVariantNumeric: 'tabular-nums',
+            color: C.ink,
+          }}
+        >
+          {value}
+        </span>
+        {delta && (
+          <span style={{ font: `500 11px/1 ${FONT}`, color: deltaColor ?? C.inkFaint, paddingBottom: 5 }}>
+            {delta}
+          </span>
+        )}
       </div>
       {note && (
-        <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost, marginTop: 6 }}>{note}</div>
+        <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 9 }}>{note}</div>
       )}
-    </Card>
+    </div>
   );
 }
 

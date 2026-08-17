@@ -4,7 +4,7 @@
 
 import { getBatches, type Batch } from '../../lib/api';
 import { C, FONT, MONO } from '../../lib/theme';
-import { ApiError, Card, Empty, Kpi, Mono, PageHeader, Pill, Table, Td } from '../../components/ui';
+import { ApiError, Card, Empty, Kpi, KpiBand, Mono, PageHeader, Pill, Table, Td } from '../../components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,8 +24,8 @@ export default async function Batches() {
   if (error) {
     return (
       <>
-        <PageHeader title="Batches + QC" subtitle="Manufactured lots, QR payloads, inspection state" />
-        <div style={{ padding: 28 }}>
+        <PageHeader title="Batches + QC" />
+        <div style={{ padding: 26 }}>
           <ApiError error={error} />
         </div>
       </>
@@ -42,21 +42,21 @@ export default async function Batches() {
 
   return (
     <>
-      <PageHeader title="Batches + QC" subtitle="Manufactured lots, QR payloads, inspection state" />
+      <PageHeader title="Batches + QC" />
 
-      <div style={{ padding: 28, display: 'grid', gap: 18 }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <Kpi label="Total batches" value={batches.length} />
-          <Kpi label="QC approved" value={qcApproved.length} deltaColor={C.green} />
-          <Kpi
-            label="Expiring ≤90d"
-            value={expiringSoon.length}
-            deltaColor={expiringSoon.length ? C.amber : C.grey}
-          />
-          <Kpi label="Cold chain" value={coldChain.length} deltaColor={C.accent} />
-        </div>
+      <KpiBand columns={4}>
+        <Kpi label="Total batches" value={batches.length} />
+        <Kpi label="QC approved" value={qcApproved.length} deltaColor={C.green} />
+        <Kpi
+          label="Expiring ≤90d"
+          value={expiringSoon.length}
+          deltaColor={expiringSoon.length ? C.amber : C.grey}
+        />
+        <Kpi label="Cold chain" value={coldChain.length} deltaColor={C.accent} />
+      </KpiBand>
 
-        <Card>
+      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
+        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
           {batches.length === 0 ? (
             <Empty>No batches on record.</Empty>
           ) : (

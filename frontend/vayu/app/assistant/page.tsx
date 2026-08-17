@@ -58,14 +58,11 @@ export default function AssistantPage() {
 
   return (
     <>
-      <PageHeader
-        title="Nidana"
-        subtitle="Grounded in evidence — the model never queries the database"
-      />
+      <PageHeader title="Nidana Assistant" />
 
       <div style={{ padding: 26, display: 'grid', gap: 16, maxWidth: 1100 }}>
         {/* Suggested prompts */}
-        <div>
+        <div style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
           <div style={{ ...LABEL, marginBottom: 8 }}>Suggested</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {PROMPTS.map((p) => (
@@ -75,7 +72,7 @@ export default function AssistantPage() {
                 disabled={busy}
                 style={{
                   padding: '5px 10px',
-                  borderRadius: 3,
+                  borderRadius: 4,
                   border: `1px solid ${C.border}`,
                   background: C.surface,
                   color: C.inkMuted,
@@ -106,7 +103,7 @@ export default function AssistantPage() {
                       background: C.ink,
                       color: C.bg,
                       padding: '7px 12px',
-                      borderRadius: 3,
+                      borderRadius: 4,
                       font: `500 12px/1.5 ${FONT}`,
                       maxWidth: '70%',
                     }}
@@ -185,7 +182,7 @@ export default function AssistantPage() {
               flex: 1,
               padding: '7px 10px',
               border: `1px solid ${C.border}`,
-              borderRadius: 3,
+              borderRadius: 4,
               font: `400 13px/1.4 ${FONT}`,
               color: C.ink,
               background: C.surface,

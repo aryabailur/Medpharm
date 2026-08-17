@@ -14,6 +14,7 @@ import {
   Card,
   Empty,
   Kpi,
+  KpiBand,
   Mono,
   PageHeader,
   Pill,
@@ -85,27 +86,26 @@ export default function Approvals() {
     <>
       <PageHeader
         title="Supply-order Approvals"
-        subtitle="Institutions request; the supplier approves, cuts, or rejects"
         right={<Segmented options={FILTERS} value={filter} onChange={setFilter} />}
       />
 
-      <div style={{ padding: 28, display: 'grid', gap: 18 }}>
+      <KpiBand columns={filter === '' ? 4 : 1}>
+        {filter === '' ? (
+          <>
+            <Kpi label="Pending" value={pending} deltaColor={C.accent} />
+            <Kpi label="Approved" value={approved} deltaColor={C.green} />
+            <Kpi label="Partial" value={partial} deltaColor={C.amber} />
+            <Kpi label="Rejected" value={rejected} deltaColor={C.red} />
+          </>
+        ) : (
+          <Kpi label={`${filter} total`} value={orders.length} />
+        )}
+      </KpiBand>
+
+      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
         {error && <ApiError error={error} />}
 
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {filter === '' ? (
-            <>
-              <Kpi label="Pending" value={pending} deltaColor={C.accent} />
-              <Kpi label="Approved" value={approved} deltaColor={C.green} />
-              <Kpi label="Partial" value={partial} deltaColor={C.amber} />
-              <Kpi label="Rejected" value={rejected} deltaColor={C.red} />
-            </>
-          ) : (
-            <Kpi label={`${filter} total`} value={orders.length} />
-          )}
-        </div>
-
-        <Card>
+        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
           {orders.length === 0 ? (
             <Empty>No orders match this filter.</Empty>
           ) : (

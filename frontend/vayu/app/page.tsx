@@ -18,7 +18,7 @@ import {
   type SupplyOrder,
 } from '../lib/api';
 import { C, FONT, MONO } from '../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, Meter, Mono, PageHeader, Pill } from '../components/ui';
+import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Meter, Mono, PageHeader, Pill } from '../components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,8 +47,8 @@ export default async function Control() {
   if (error) {
     return (
       <>
-        <PageHeader title="Control" subtitle="Supplier terminal · network overview" />
-        <div style={{ padding: 28 }}>
+        <PageHeader title="Plant Control" />
+        <div style={{ padding: 26 }}>
           <ApiError error={error} />
         </div>
       </>
@@ -66,11 +66,10 @@ export default async function Control() {
 
   return (
     <>
-      <PageHeader title="Control" subtitle="Supplier terminal · network overview" />
+      <PageHeader title="Plant Control" />
 
-      <div style={{ padding: 28, display: 'grid', gap: 18 }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <Kpi
+      <KpiBand columns={5}>
+        <Kpi
             label="Pending approval"
             value={orders.length}
             delta={oldest ? `oldest ${oldest.ageHours}h` : undefined}
@@ -104,10 +103,11 @@ export default async function Control() {
             value={summary ? summary.institutions : '—'}
             note={summary ? `${summary.facilities} facilities + ${summary.warehouses} warehouses` : undefined}
           />
-        </div>
+      </KpiBand>
 
+      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 18 }}>
-          <Card>
+          <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
             <CardTitle right={<Link href="/orders" style={{ font: `600 12px/1 ${FONT}`, color: C.accent, textDecoration: 'none' }}>Open queue →</Link>}>
               Awaiting approval
             </CardTitle>

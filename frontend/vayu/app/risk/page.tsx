@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 
 import { askAssistant } from '../../lib/api';
 import { C, FONT, MONO, bandColors } from '../../lib/theme';
-import { ApiError, Card, Empty, Kpi, PageHeader } from '../../components/ui';
+import { ApiError, Card, Empty, Kpi, KpiBand, PageHeader } from '../../components/ui';
 import { Sparkline } from '../../components/charts';
 
 interface RiskSignal {
@@ -97,10 +97,19 @@ export default function RiskPage() {
 
   return (
     <>
-      <PageHeader title="Risk + Forecast" subtitle="Stockout risk scoring and next-period demand" />
+      <PageHeader title="Risk + Demand Forecast" />
 
-      <div style={{ padding: 28, display: 'grid', gap: 28 }}>
-        <section style={{ display: 'grid', gap: 14 }}>
+      {riskData && !riskError && (
+        <KpiBand columns={4}>
+          <Kpi label="Flagged" value={riskData.length} />
+          <Kpi label="Critical" value={critical} deltaColor={critical ? C.red : C.grey} />
+          <Kpi label="High" value={high} deltaColor={high ? C.amber : C.grey} />
+          <Kpi label="High confidence" value={highConfidence} deltaColor={C.accent} />
+        </KpiBand>
+      )}
+
+      <div style={{ padding: 26, display: 'grid', gap: 28 }}>
+        <section style={{ display: 'grid', gap: 14, animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
           <div style={{ font: `600 13px/1.3 ${FONT}`, color: C.ink }}>Stockout Risk</div>
 
           {riskError ? (
@@ -109,13 +118,6 @@ export default function RiskPage() {
             <Empty>Loading…</Empty>
           ) : (
             <>
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                <Kpi label="Flagged" value={riskData.length} />
-                <Kpi label="Critical" value={critical} deltaColor={critical ? C.red : C.grey} />
-                <Kpi label="High" value={high} deltaColor={high ? C.amber : C.grey} />
-                <Kpi label="High confidence" value={highConfidence} deltaColor={C.accent} />
-              </div>
-
               {rows.length === 0 ? (
                 <Empty>No stockout risk detected.</Empty>
               ) : (
@@ -151,7 +153,7 @@ export default function RiskPage() {
                             <span
                               style={{
                                 padding: '2px 7px',
-                                borderRadius: 3,
+                                borderRadius: 4,
                                 background: bc.tint,
                                 color: bc.color,
                                 font: `600 10px/1.5 ${MONO}`,
@@ -163,7 +165,7 @@ export default function RiskPage() {
                             <span
                               style={{
                                 padding: '2px 7px',
-                                borderRadius: 3,
+                                borderRadius: 4,
                                 background: C.greyTint,
                                 color: C.inkSoft,
                                 font: `500 10px/1.5 ${FONT}`,
@@ -206,7 +208,7 @@ export default function RiskPage() {
                                 display: 'inline-block',
                                 marginTop: 8,
                                 padding: '2px 7px',
-                                borderRadius: 3,
+                                borderRadius: 4,
                                 background: C.greyTint,
                                 color: C.inkSoft,
                                 font: `500 10px/1.5 ${MONO}`,
@@ -257,7 +259,7 @@ export default function RiskPage() {
                           <span
                             style={{
                               padding: '2px 7px',
-                              borderRadius: 3,
+                              borderRadius: 4,
                               background: f.changePct > 0 ? C.amberTint : C.greenTint,
                               color: f.changePct > 0 ? C.amber : C.green,
                               font: `600 10px/1.5 ${MONO}`,
@@ -288,7 +290,7 @@ export default function RiskPage() {
                             background: C.greyTint,
                             color: C.inkMuted,
                             font: `500 10px/1.6 ${FONT}`,
-                            borderRadius: 3,
+                            borderRadius: 4,
                           }}
                         >
                           {d.direction === 'RISING' ? '↑' : d.direction === 'FALLING' ? '↓' : '•'} {d.label}
