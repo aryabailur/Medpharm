@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 
 import { getComplaints, type LocalComplaint } from '../../lib/api';
 import { C, FONT, MONO, rise } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Mono, PageHeader, Pill } from '../../components/ui';
+import { ApiError, Card, CardTitle, Empty, PageHeader, Pill } from '../../components/ui';
 
 function fmtDate(d: string): string {
   return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
