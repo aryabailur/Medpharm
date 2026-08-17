@@ -54,7 +54,13 @@ export async function batchRoutes(app: FastifyInstance): Promise<void> {
         orderBy: { expiryDate: 'asc' },
         take,
         skip,
-        include: { drug: { select: { id: true, name: true, coldChain: true } } },
+        include: {
+          drug: { select: { id: true, name: true, coldChain: true } },
+          // The QC screen needs the latest inspection per batch. Without this
+          // every batch reads as "awaiting QC", which is wrong rather than
+          // merely incomplete.
+          qcRecords: { orderBy: { testedAt: 'desc' }, take: 1 },
+        },
       }),
       prisma.batch.count({ where }),
     ]);
