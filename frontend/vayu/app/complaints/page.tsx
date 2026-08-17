@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { getComplaints, setComplaintStatus, type Complaint } from '../../lib/api';
 import { C, FONT, MONO } from '../../lib/theme';
-import { ApiError, Button, Card, CardTitle, Empty, Kpi, PageHeader, Pill, Segmented } from '../../components/ui';
+import { ApiError, Button, Card, CardTitle, Empty, Kpi, KpiBand, PageHeader, Pill, Segmented } from '../../components/ui';
 
 const FILTERS = [
   { value: '', label: 'All' },
@@ -71,23 +71,22 @@ export default function ComplaintsPage() {
   return (
     <>
       <PageHeader
-        title="Complaints + RCA"
-        subtitle="Institution-filed issues, pre-linked to batch and shipment"
+        title="Complaints + Root Cause"
         right={<Segmented options={FILTERS} value={filter} onChange={setFilter} />}
       />
 
-      <div style={{ padding: 28, display: 'grid', gap: 18 }}>
+      <KpiBand columns={4}>
+        <Kpi label="Open" value={open} deltaColor={open ? C.amber : C.grey} />
+        <Kpi label="Investigating" value={investigating} deltaColor={C.accent} />
+        <Kpi label="Resolved" value={resolved} deltaColor={C.green} />
+        <Kpi label="With RCA" value={withRca} />
+      </KpiBand>
+
+      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
         {error && <ApiError error={error} />}
 
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <Kpi label="Open" value={open} deltaColor={open ? C.amber : C.grey} />
-          <Kpi label="Investigating" value={investigating} deltaColor={C.accent} />
-          <Kpi label="Resolved" value={resolved} deltaColor={C.green} />
-          <Kpi label="With RCA" value={withRca} />
-        </div>
-
         <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
-          <Card style={{ flex: '1 1 380px', minWidth: 320, maxWidth: 440 }}>
+          <Card style={{ flex: '1 1 380px', minWidth: 320, maxWidth: 440, animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
             <CardTitle>Complaints</CardTitle>
             {complaints.length === 0 ? (
               <Empty>No complaints match this filter.</Empty>
@@ -165,7 +164,7 @@ export default function ComplaintsPage() {
                         font: `400 11px/1.5 ${MONO}`,
                         background: C.greyTint,
                         padding: 12,
-                        borderRadius: 3,
+                        borderRadius: 4,
                         maxHeight: 320,
                         overflow: 'auto',
                         whiteSpace: 'pre-wrap',

@@ -27,13 +27,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           ::-webkit-scrollbar { width:9px; height:9px; }
           ::-webkit-scrollbar-thumb { background:${C.border}; border-radius:5px; border:2px solid ${C.bg}; }
           select, input { font-family:${FONT}; }
+          @keyframes mtRise { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:none } }
         `}</style>
       </head>
       <body style={{ font: `400 13px/1.5 ${FONT}`, color: C.ink, background: C.bg }}>
-        <div style={{ display: 'flex', minHeight: '100vh' }}>
-          <Nav />
-          <main style={{ flex: 1, minWidth: 0 }}>{children}</main>
-        </div>
+        <Nav />
+        <main style={{ minWidth: 0 }}>{children}</main>
       </body>
     </html>
   );

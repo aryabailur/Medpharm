@@ -47,12 +47,27 @@ export const FONT =
   '"Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 export const MONO = '"Geist Mono", ui-monospace, "SF Mono", Menlo, monospace';
 
-/** Terminal-style section label: small, uppercase, wide tracking. */
+/** Section label — 11px, .17em tracking, exactly as the handoff specifies. */
 export const LABEL = {
-  font: `600 10px/1 ${FONT}`,
-  letterSpacing: '.14em',
+  font: `600 11px/1 ${FONT}`,
+  letterSpacing: '.17em',
   textTransform: 'uppercase' as const,
-  color: C.inkGhost,
+  color: C.inkFaint,
+};
+
+/** Shell geometry, lifted from the handoff markup. */
+export const SHELL = {
+  headerH: 56,
+  navH: 48,
+  subTabH: 48,
+  gutter: 26,
+  radius: 4,
+} as const;
+
+/** Tabular figures so columns line up — the handoff sets this on every number. */
+export const FIGURE = {
+  fontVariantNumeric: 'tabular-nums' as const,
+  letterSpacing: '-.02em',
 };
 
 export function statusColors(status: string): { color: string; tint: string } {

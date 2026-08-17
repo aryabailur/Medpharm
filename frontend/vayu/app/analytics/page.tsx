@@ -26,7 +26,7 @@ import {
   type VendorMetric,
 } from '../../lib/api';
 import { C, FONT, rupees } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, Mono, PageHeader, Table, Td } from '../../components/ui';
+import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Table, Td } from '../../components/ui';
 import { BarChart, Histogram, LineChart, MultiLineChart, ScatterPlot } from '../../components/charts';
 
 const DEFAULT_DRUG_ID = 'DRG002';
@@ -94,15 +94,11 @@ export default function AnalyticsPage() {
     })();
   }, [drugId]);
 
-  const subtitle = summary
-    ? `${summary.horizon.from ?? '—'} – ${summary.horizon.to ?? '—'} · ${summary.ledgerRows.toLocaleString('en-IN')} ledger rows across ${summary.institutions} institutions`
-    : 'Loading network summary…';
-
   if (!loaded) {
     return (
       <>
-        <PageHeader title="Network Analytics" subtitle={subtitle} />
-        <div style={{ padding: 28 }}>
+        <PageHeader title="Network Analytics" />
+        <div style={{ padding: 26 }}>
           <Empty>Loading…</Empty>
         </div>
       </>
@@ -112,8 +108,8 @@ export default function AnalyticsPage() {
   if (error) {
     return (
       <>
-        <PageHeader title="Network Analytics" subtitle={subtitle} />
-        <div style={{ padding: 28 }}>
+        <PageHeader title="Network Analytics" />
+        <div style={{ padding: 26 }}>
           <ApiError error={error} />
         </div>
       </>
@@ -159,31 +155,30 @@ export default function AnalyticsPage() {
 
   return (
     <>
-      <PageHeader title="Network Analytics" subtitle={subtitle} />
+      <PageHeader title="Network Analytics" />
 
-      <div style={{ padding: 28, display: 'grid', gap: 28 }}>
-        {/* 1. KPIs */}
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <Kpi
-            label="Ledger rows"
-            value={summary ? num(summary.ledgerRows) : '—'}
-            note={summary ? `${summary.horizon.from ?? '—'} – ${summary.horizon.to ?? '—'}` : undefined}
-          />
-          <Kpi
-            label="Institutions"
-            value={summary ? summary.institutions : '—'}
-            note={summary ? `${summary.facilities} facilities + ${summary.warehouses} warehouses` : undefined}
-          />
-          <Kpi
-            label="Below reorder"
-            value={stockHealth ? stockHealth.belowReorder : '—'}
-            deltaColor={stockHealth && stockHealth.belowReorder > 0 ? C.amber : C.grey}
-          />
-          <Kpi label="Districts" value={summary ? summary.districts : '—'} />
-        </div>
+      <KpiBand columns={4}>
+        <Kpi
+          label="Ledger rows"
+          value={summary ? num(summary.ledgerRows) : '—'}
+          note={summary ? `${summary.horizon.from ?? '—'} – ${summary.horizon.to ?? '—'}` : undefined}
+        />
+        <Kpi
+          label="Institutions"
+          value={summary ? summary.institutions : '—'}
+          note={summary ? `${summary.facilities} facilities + ${summary.warehouses} warehouses` : undefined}
+        />
+        <Kpi
+          label="Below reorder"
+          value={stockHealth ? stockHealth.belowReorder : '—'}
+          deltaColor={stockHealth && stockHealth.belowReorder > 0 ? C.amber : C.grey}
+        />
+        <Kpi label="Districts" value={summary ? summary.districts : '—'} />
+      </KpiBand>
 
+      <div style={{ padding: 26, display: 'grid', gap: 28 }}>
         {/* 2. Consumption & seasonality */}
-        <Card>
+        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
           <CardTitle
             right={
               <select
@@ -194,7 +189,7 @@ export default function AnalyticsPage() {
                   color: C.ink,
                   background: C.surface,
                   border: `1px solid ${C.border}`,
-                  borderRadius: 3,
+                  borderRadius: 4,
                   padding: '4px 8px',
                 }}
               >

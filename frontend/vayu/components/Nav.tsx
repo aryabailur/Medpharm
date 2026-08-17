@@ -1,139 +1,416 @@
 'use client';
 
 /**
- * Terminal sidebar — Vayu.
+ * Terminal shell — Vayu.
  *
- * Ports the handoff's nav verbatim: four groups, numbered rows, near-black
- * active state. Light rail on warm paper, distinguished from Dhanvantari by
- * the identity block rather than by a different palette.
+ * Ports the handoff's three-tier chrome verbatim:
+ *   56px header   brand · context line · ⌘K palette · live clock
+ *   48px nav      four numbered domains, active one underlined in ink
+ *   48px sub-tabs screens within the active domain, plus a context meta line
+ *
+ * Both nav rows are sticky (top: 56 and top: 104) so the chrome stays put while
+ * a long table scrolls under it. That stickiness is why the geometry is fixed
+ * rather than fluid.
  */
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
-import { C, FONT, LABEL, MONO } from '../lib/theme';
+import { C, FONT, MONO, SHELL } from '../lib/theme';
 
-const GROUPS: Array<{ label: string; items: Array<[string, string]> }> = [
+interface Screen {
+  href: string;
+  label: string;
+  title: string;
+  meta: string;
+}
+
+const DOMAINS: Array<{ idx: string; label: string; screens: Screen[] }> = [
   {
+    idx: '01',
     label: 'Plant',
-    items: [
-      ['/', 'Control'],
-      ['/batches', 'Batches + QC'],
+    screens: [
+      { href: '/', label: 'Control', title: 'Plant Control', meta: 'live over SSE' },
+      { href: '/batches', label: 'Batches + QC', title: 'Batches + QC', meta: 'lots, QR payloads, inspection state' },
     ],
   },
   {
+    idx: '02',
     label: 'Fulfilment',
-    items: [
-      ['/orders', 'Approvals'],
-      ['/shipments', 'Dispatch'],
-      ['/telemetry', 'Telemetry + Excursions'],
+    screens: [
+      { href: '/orders', label: 'Approvals', title: 'Supply-order Approvals', meta: 'institutions request · the supplier decides' },
+      { href: '/shipments', label: 'Dispatch', title: 'Shipment Dispatch', meta: 'warehouse to institution' },
+      { href: '/telemetry', label: 'Telemetry + Excursions', title: 'Telemetry + Excursions', meta: 'live position and temperature' },
     ],
   },
   {
+    idx: '03',
     label: 'Evidence',
-    items: [
-      ['/complaints', 'Complaints + RCA'],
-      ['/trace', 'Trace'],
+    screens: [
+      { href: '/complaints', label: 'Complaints + RCA', title: 'Complaints + Root Cause', meta: 'pre-linked to batch and shipment' },
+      { href: '/trace', label: 'Trace', title: 'Supply-chain Trace', meta: 'full custody chain' },
     ],
   },
   {
+    idx: '04',
     label: 'Intelligence',
-    items: [
-      ['/risk', 'Risk + Forecast'],
-      ['/analytics', 'Network Analytics'],
-      ['/assistant', 'Nidana'],
+    screens: [
+      { href: '/risk', label: 'Risk + Forecast', title: 'Risk + Demand Forecast', meta: 'five signals · 80% band' },
+      { href: '/analytics', label: 'Network Analytics', title: 'Network Analytics', meta: '88,224 ledger rows · 49 institutions' },
+      { href: '/assistant', label: 'Nidana', title: 'Nidana Assistant', meta: 'network scope · every institution this plant supplies' },
     ],
   },
 ];
 
+const ALL: Screen[] = DOMAINS.flatMap((d) => d.screens);
+
+function activeScreen(pathname: string): Screen {
+  if (pathname === '/') return ALL[0]!;
+  return ALL.find((s) => s.href !== '/' && pathname.startsWith(s.href)) ?? ALL[0]!;
+}
+
 export default function Nav() {
   const pathname = usePathname();
-  let n = 0;
+  const router = useRouter();
+  const [clock, setClock] = useState('');
+  const [palette, setPalette] = useState(false);
+  const [q, setQ] = useState('');
+
+  // Live clock, as the handoff's header shows.
+  useEffect(() => {
+    const tick = () =>
+      setClock(
+        new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      );
+    tick();
+    const id = setInterval(tick, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ⌘K / Ctrl+K opens the palette; Escape closes it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPalette((p) => !p);
+        setQ('');
+      } else if (e.key === 'Escape') setPalette(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const current = activeScreen(pathname);
+  const currentDomain = DOMAINS.find((d) => d.screens.some((s) => s.href === current.href)) ?? DOMAINS[0]!;
+  const hits = ALL.filter((s) => s.label.toLowerCase().includes(q.toLowerCase()) || s.title.toLowerCase().includes(q.toLowerCase()));
 
   return (
-    <aside
-      style={{
-        width: 224,
-        flex: '0 0 224px',
-        background: C.surfaceAlt,
-        borderRight: `1px solid ${C.border}`,
-        display: 'flex',
-        flexDirection: 'column',
-        position: 'sticky',
-        top: 0,
-        height: '100vh',
-      }}
-    >
-      <div style={{ padding: '16px 14px 14px', borderBottom: `1px solid ${C.border}` }}>
-        <div style={{ ...LABEL, color: C.inkGhost }}>MedTrack</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 9 }}>
-          <div
+    <>
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'stretch',
+          height: SHELL.headerH,
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+          position: 'sticky',
+          top: 0,
+          zIndex: 6,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+            padding: '0 22px',
+            borderRight: `1px solid ${C.borderFaint}`,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
+            <span style={{ font: `600 11px/1 ${MONO}`, letterSpacing: '.22em', color: C.inkSoft }}>
+              MEDTRACK
+            </span>
+            <span style={{ width: 1, height: 11, background: C.border, display: 'inline-block' }} />
+            <span style={{ font: `700 20px/1 ${FONT}`, letterSpacing: '-.02em', color: C.ink }}>Vayu</span>
+          </div>
+          <span
             style={{
-              width: 24,
-              height: 24,
-              borderRadius: 3,
-              background: C.ink,
-              color: C.bg,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              font: `600 12px/1 ${MONO}`,
+              font: `600 11px/1 ${FONT}`,
+              letterSpacing: '.1em',
+              textTransform: 'uppercase',
+              color: C.inkSoft,
             }}
           >
-            V
-          </div>
-          <div>
-            <div style={{ font: `600 13px/1.2 ${FONT}`, color: C.ink }}>Vayu</div>
-            <div style={{ font: `400 10px/1.4 ${FONT}`, color: C.inkGhost }}>Supplier terminal</div>
-          </div>
+            Manufacturer
+          </span>
         </div>
+
+        <div
+          style={{
+            flex: '3 1 auto',
+            minWidth: 150,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+            padding: '0 18px',
+            overflow: 'hidden',
+          }}
+        >
+          <span
+            style={{
+              font: `400 11px/1.4 ${MONO}`,
+              color: C.inkMuted,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Bharat Biologicals · Pune plant · 49 institutions
+          </span>
+        </div>
+
+        <button
+          onClick={() => setPalette(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            alignSelf: 'center',
+            marginRight: 14,
+            background: C.bg,
+            border: `1px solid ${C.border}`,
+            borderRadius: SHELL.radius,
+            padding: '8px 11px',
+            flex: '1 6 210px',
+            minWidth: 120,
+            maxWidth: 250,
+            cursor: 'pointer',
+          }}
+        >
+          <span style={{ font: `400 12px/1 ${MONO}`, color: C.inkSoft }}>⌕</span>
+          <span
+            style={{
+              font: `400 12px/1 ${FONT}`,
+              color: C.inkSoft,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Search or jump to…
+          </span>
+          <span
+            style={{
+              marginLeft: 'auto',
+              font: `400 10px/1 ${MONO}`,
+              color: C.inkSoft,
+              border: `1px solid ${C.border}`,
+              borderRadius: 2,
+              padding: '3px 5px',
+            }}
+          >
+            ⌘K
+          </span>
+        </button>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0 20px',
+            borderLeft: `1px solid ${C.borderFaint}`,
+          }}
+        >
+          <span
+            style={{
+              font: `600 21px/1 ${MONO}`,
+              color: C.ink,
+              fontVariantNumeric: 'tabular-nums',
+              letterSpacing: '-.01em',
+            }}
+          >
+            {clock || '--:--'}
+          </span>
+        </div>
+      </header>
+
+      {/* ── Domain nav ─────────────────────────────────────────────────── */}
+      <nav
+        style={{
+          display: 'flex',
+          alignItems: 'stretch',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+          padding: `0 ${SHELL.gutter}px`,
+          height: SHELL.navH,
+          position: 'sticky',
+          top: SHELL.headerH,
+          zIndex: 5,
+        }}
+      >
+        {DOMAINS.map((d) => {
+          const active = d.label === currentDomain.label;
+          return (
+            <button
+              key={d.idx}
+              onClick={() => router.push(d.screens[0]!.href)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 9,
+                padding: '0 18px',
+                border: 'none',
+                borderBottom: `2px solid ${active ? C.ink : 'transparent'}`,
+                background: 'transparent',
+                color: active ? C.ink : C.inkFaint,
+                font: `${active ? 600 : 500} 13px/1 ${FONT}`,
+                cursor: 'pointer',
+              }}
+            >
+              <span style={{ font: `500 10px/1 ${MONO}`, color: active ? C.ink : C.inkGhost }}>
+                {d.idx}
+              </span>
+              {d.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* ── Sub-tabs ───────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          background: C.bg,
+          borderBottom: `1px solid ${C.border}`,
+          padding: `0 ${SHELL.gutter}px`,
+          height: SHELL.subTabH,
+          position: 'sticky',
+          top: SHELL.headerH + SHELL.navH,
+          zIndex: 4,
+        }}
+      >
+        {currentDomain.screens.map((s) => {
+          const active = s.href === current.href;
+          return (
+            <Link
+              key={s.href}
+              href={s.href}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                border: `1px solid ${active ? C.border : 'transparent'}`,
+                background: active ? C.surface : 'transparent',
+                color: active ? C.ink : C.inkFaint,
+                padding: '9px 13px',
+                borderRadius: SHELL.radius,
+                font: `500 13px/1 ${FONT}`,
+                textDecoration: 'none',
+              }}
+            >
+              {s.label}
+            </Link>
+          );
+        })}
+        <div style={{ flex: 1 }} />
+        <span style={{ font: `400 11px/1 ${MONO}`, letterSpacing: '.08em', color: C.inkFaint }}>
+          {current.meta}
+        </span>
       </div>
 
-      <div style={{ padding: '12px 8px', overflowY: 'auto', flex: 1 }}>
-        {GROUPS.map((g) => (
-          <div key={g.label} style={{ marginBottom: 14 }}>
-            <div style={{ ...LABEL, padding: '0 8px 7px' }}>{g.label}</div>
-            {g.items.map(([href, label]) => {
-              n += 1;
-              const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 9,
-                    padding: '6px 8px',
-                    borderRadius: 3,
-                    marginBottom: 1,
-                    background: active ? C.ink : 'transparent',
-                    color: active ? C.bg : C.inkMuted,
-                    font: `${active ? 600 : 400} 12px/1.4 ${FONT}`,
-                    textDecoration: 'none',
-                  }}
-                >
-                  <span
+      {/* ── Command palette ────────────────────────────────────────────── */}
+      {palette && (
+        <div
+          onClick={() => setPalette(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(23,22,20,.35)',
+            zIndex: 40,
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+            paddingTop: 120,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 520,
+              maxWidth: '90vw',
+              background: C.surface,
+              border: `1px solid ${C.border}`,
+              borderRadius: SHELL.radius,
+              overflow: 'hidden',
+            }}
+          >
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && hits[0]) {
+                  router.push(hits[0].href);
+                  setPalette(false);
+                }
+              }}
+              placeholder="Search or jump to…"
+              style={{
+                width: '100%',
+                padding: '13px 15px',
+                border: 'none',
+                borderBottom: `1px solid ${C.borderSoft}`,
+                font: `400 14px/1 ${FONT}`,
+                color: C.ink,
+                outline: 'none',
+              }}
+            />
+            <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+              {hits.length === 0 ? (
+                <div style={{ padding: 15, font: `400 12px/1 ${FONT}`, color: C.inkGhost }}>
+                  Nothing matches “{q}”.
+                </div>
+              ) : (
+                hits.map((s) => (
+                  <button
+                    key={s.href}
+                    onClick={() => {
+                      router.push(s.href);
+                      setPalette(false);
+                    }}
                     style={{
-                      font: `500 9px/1 ${MONO}`,
-                      color: active ? C.bg : C.inkGhost,
-                      opacity: active ? 0.7 : 1,
-                      minWidth: 12,
+                      display: 'flex',
+                      width: '100%',
+                      alignItems: 'baseline',
+                      gap: 10,
+                      padding: '10px 15px',
+                      border: 'none',
+                      borderBottom: `1px solid ${C.borderSoft}`,
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left',
                     }}
                   >
-                    {String(n).padStart(2, '0')}
-                  </span>
-                  {label}
-                </Link>
-              );
-            })}
+                    <span style={{ font: `500 13px/1 ${FONT}`, color: C.ink }}>{s.label}</span>
+                    <span style={{ font: `400 11px/1 ${MONO}`, color: C.inkGhost }}>{s.title}</span>
+                  </button>
+                ))
+              )}
+            </div>
           </div>
-        ))}
-      </div>
-
-      <div style={{ padding: '10px 14px', borderTop: `1px solid ${C.border}` }}>
-        <div style={{ font: `400 10px/1.5 ${MONO}`, color: C.inkGhost }}>PS-SS04 · network scope</div>
-      </div>
-    </aside>
+        </div>
+      )}
+    </>
   );
+}
+
+/** Page title + meta for the active route, so screens don't restate them. */
+export function useScreenMeta() {
+  const pathname = usePathname();
+  return activeScreen(pathname);
 }

@@ -54,10 +54,10 @@ export default function Trace() {
 
   return (
     <>
-      <PageHeader title="Trace" subtitle="Full custody chain from manufacture to complaint" />
+      <PageHeader title="Supply-chain Trace" />
 
-      <div style={{ padding: 28, display: 'grid', gap: 18, maxWidth: 720 }}>
-        <div>
+      <div style={{ padding: 26, display: 'grid', gap: 18, maxWidth: 720 }}>
+        <div style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               value={query}
@@ -69,7 +69,7 @@ export default function Trace() {
               style={{
                 flex: 1,
                 border: `1px solid ${C.border}`,
-                borderRadius: 3,
+                borderRadius: 4,
                 padding: '7px 10px',
                 font: `400 13px/1.4 ${FONT}`,
                 color: C.ink,
