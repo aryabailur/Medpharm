@@ -12,7 +12,7 @@
  * identical to how Vayu uses it for "QR payload + icons".
  */
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import type { ReceivedBatch } from '../lib/api';
 import { C, FONT, MONO, statusColors } from '../lib/theme';
@@ -324,9 +324,8 @@ export default function BatchCatalog({ groups, searchQuery = '' }: BatchCatalogP
       {filtered.map((group) => {
         const isOpen = expanded.has(group.drugRef);
         return (
-          <>
+          <Fragment key={group.drugRef}>
             <DrugRow
-              key={group.drugRef}
               group={group}
               isOpen={isOpen}
               onToggle={() => toggle(group.drugRef)}
@@ -340,7 +339,7 @@ export default function BatchCatalog({ groups, searchQuery = '' }: BatchCatalogP
                   idx={idx}
                 />
               ))}
-          </>
+          </Fragment>
         );
       })}
     </Table>

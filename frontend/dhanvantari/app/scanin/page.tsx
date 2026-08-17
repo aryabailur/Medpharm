@@ -9,7 +9,7 @@
  * is a PROPOSAL — nothing writes to inventory until the human hits commit.
  */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 
 import {
   confirmReceipt,
@@ -19,6 +19,7 @@ import {
 } from '../../lib/api';
 import { C, EASE, FONT, MONO, num, rise } from '../../lib/theme';
 import { ApiError, Button, Card, CardTitle, Empty, PageHeader } from '../../components/ui';
+import BarcodeScanner from '../../components/BarcodeScanner';
 
 const inputStyle = {
   padding: '7px 10px',
@@ -42,8 +43,7 @@ export default function ScanIn() {
   const [committed, setCommitted] = useState(false);
   const [filedComplaintId, setFiledComplaintId] = useState<string | null>(null);
 
-  async function handleResolve() {
-    const value = qr.trim();
+  async function handleResolve(value = qr.trim()) {
     if (!value || resolving) return;
     setResolving(true);
     setResolveError(null);
@@ -66,6 +66,13 @@ export default function ScanIn() {
       setResolving(false);
     }
   }
+
+  // Called by BarcodeScanner on camera detection — auto-resolves, no typing needed
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const handleScan = useCallback((decoded: string) => {
+    setQr(decoded);
+    void handleResolve(decoded);
+  }, []);
 
   const short = batch && batch.qtyExpected != null ? Math.max(0, batch.qtyExpected - qtyReceived) : 0;
   const hasExcursion = !!batch?.anomalyFlag;
@@ -184,37 +191,9 @@ export default function ScanIn() {
               Batch, shipment and expected quantity arrive pre-linked. Nothing typed by hand.
             </div>
 
-            <div
-              style={{
-                border: `1px solid ${C.border}`,
-                background: C.bg,
-                height: 224,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 14,
-                marginTop: 14,
-              }}
-            >
-              <div style={{ width: 136, height: 136, position: 'relative' }}>
-                <span style={{ position: 'absolute', top: 0, left: 0, width: 26, height: 26, borderTop: `2px solid ${C.ink}`, borderLeft: `2px solid ${C.ink}` }} />
-                <span style={{ position: 'absolute', top: 0, right: 0, width: 26, height: 26, borderTop: `2px solid ${C.ink}`, borderRight: `2px solid ${C.ink}` }} />
-                <span style={{ position: 'absolute', bottom: 0, left: 0, width: 26, height: 26, borderBottom: `2px solid ${C.ink}`, borderLeft: `2px solid ${C.ink}` }} />
-                <span style={{ position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderBottom: `2px solid ${C.ink}`, borderRight: `2px solid ${C.ink}` }} />
-                <span
-                  style={{
-                    position: 'absolute',
-                    inset: 24,
-                    background:
-                      'repeating-linear-gradient(0deg,#171614 0 5px,transparent 5px 10px),repeating-linear-gradient(90deg,#171614 0 5px,transparent 5px 10px)',
-                    opacity: 0.72,
-                  }}
-                />
-              </div>
-              <div style={{ font: `500 11px/1 ${MONO}`, letterSpacing: '.06em', color: C.inkMuted }}>
-                {batch ? `${batch.batchId} RECOGNISED` : 'AWAITING SCAN'}
-              </div>
+            {/* Live camera scanner — same html5-qrcode engine as outer Dhanvantari */}
+            <div style={{ marginTop: 14 }}>
+              <BarcodeScanner onScanSuccess={handleScan} />
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
@@ -224,7 +203,7 @@ export default function ScanIn() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void handleResolve();
                 }}
-                placeholder="Scan or type batch id / QR value"
+                placeholder="Or type batch id / QR value"
                 style={{ ...inputStyle, flex: 1 }}
               />
               <Button onClick={() => void handleResolve()} disabled={resolving || !qr.trim()}>
@@ -307,6 +286,22 @@ export default function ScanIn() {
                   <div style={{ font: `500 13px/1.5 ${MONO}`, color: r.color, textAlign: 'right' }}>{r.value}</div>
                 </div>
               ))}
+
+              {/* Qty adjuster */}
+              {!committed && (
+                <div style={{ padding: '14px 18px', borderBottom: `1px solid ${C.borderSoft}` }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ font: `500 12px/1 ${FONT}`, color: C.inkMuted }}>Adjust qty counted</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={qtyReceived}
+                      onChange={(e) => setQtyReceived(Number(e.target.value))}
+                      style={{ ...inputStyle, width: 100 }}
+                    />
+                  </label>
+                </div>
+              )}
 
               <div style={{ padding: 20 }}>
                 {needsComplaint && !committed && (
