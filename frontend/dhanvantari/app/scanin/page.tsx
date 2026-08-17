@@ -4,6 +4,9 @@
  * Scan-in — §11's 3:20 beat: no form, no batch number typed. Scan, photo,
  * send. A QR resolves straight to the drug/batch/expiry/QC the supplier
  * already declared; the dock only confirms quantity and condition.
+ *
+ * Confirm-before-commit is the whole point of this screen: the proposed count
+ * is a PROPOSAL — nothing writes to inventory until the human hits commit.
  */
 
 import { useState } from 'react';
@@ -14,21 +17,8 @@ import {
   resolveQr,
   type ResolvedBatch,
 } from '../../lib/api';
-import { C, FONT, MONO } from '../../lib/theme';
-import { ApiError, Button, Card, CardTitle, Empty, PageHeader, Pill, Segmented } from '../../components/ui';
-
-const COMPLAINT_CATEGORIES = [
-  { value: 'BREAKAGE', label: 'Breakage' },
-  { value: 'QTY_MISMATCH', label: 'Qty mismatch' },
-  { value: 'TEMP_DAMAGE', label: 'Temp damage' },
-  { value: 'SEAL_TAMPERED', label: 'Seal tampered' },
-  { value: 'NEAR_EXPIRY', label: 'Near expiry' },
-];
-
-const ACCEPT_OPTIONS = [
-  { value: 'accept', label: 'Accept' },
-  { value: 'reject', label: 'Reject' },
-];
+import { C, EASE, FONT, MONO, num, rise } from '../../lib/theme';
+import { ApiError, Button, Card, CardTitle, Empty, PageHeader } from '../../components/ui';
 
 const inputStyle = {
   padding: '7px 10px',
@@ -47,17 +37,10 @@ export default function ScanIn() {
   const [batch, setBatch] = useState<ResolvedBatch | null>(null);
 
   const [qtyReceived, setQtyReceived] = useState<number>(0);
-  const [decision, setDecision] = useState('accept');
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
-
-  const [showComplaint, setShowComplaint] = useState(false);
-  const [category, setCategory] = useState('BREAKAGE');
-  const [description, setDescription] = useState('');
-  const [filingComplaint, setFilingComplaint] = useState(false);
-  const [complaintError, setComplaintError] = useState<string | null>(null);
-  const [complaintId, setComplaintId] = useState<string | null>(null);
+  const [committed, setCommitted] = useState(false);
+  const [filedComplaintId, setFiledComplaintId] = useState<string | null>(null);
 
   async function handleResolve() {
     const value = qr.trim();
@@ -66,14 +49,12 @@ export default function ScanIn() {
     setResolveError(null);
     setNotFound(null);
     setBatch(null);
-    setConfirmed(false);
-    setShowComplaint(false);
-    setComplaintId(null);
+    setCommitted(false);
+    setFiledComplaintId(null);
     try {
       const res = await resolveQr(value);
       setBatch(res);
       setQtyReceived(res.qtyExpected ?? 0);
-      setDecision('accept');
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.includes('404')) {
@@ -86,7 +67,11 @@ export default function ScanIn() {
     }
   }
 
-  async function handleConfirm() {
+  const short = batch && batch.qtyExpected != null ? Math.max(0, batch.qtyExpected - qtyReceived) : 0;
+  const hasExcursion = !!batch?.anomalyFlag;
+  const needsComplaint = short > 0 || hasExcursion;
+
+  async function handleCommit() {
     if (!batch || confirming) return;
     setConfirming(true);
     setConfirmError(null);
@@ -99,12 +84,27 @@ export default function ScanIn() {
             batchId: batch.batchId,
             qtyExpected: batch.qtyExpected ?? undefined,
             qtyReceived,
-            accepted: decision === 'accept',
+            accepted: true,
             conditionPhotoUrls: [],
           },
         ],
       });
-      setConfirmed(true);
+      let cid: string | null = null;
+      if (needsComplaint) {
+        const res = await fileComplaint({
+          batchId: batch.batchId,
+          shipmentId: batch.shipmentId ?? undefined,
+          institutionId: 'self',
+          category: hasExcursion ? 'TEMP_DAMAGE' : 'QTY_MISMATCH',
+          description:
+            short > 0
+              ? `${short} units short of manifest${hasExcursion ? '; shipment carries a cold-chain excursion' : ''}.`
+              : 'Cold-chain excursion attached to this shipment.',
+        });
+        cid = res.complaintId;
+      }
+      setFiledComplaintId(cid);
+      setCommitted(true);
     } catch (e) {
       setConfirmError((e as Error).message);
     } finally {
@@ -112,167 +112,282 @@ export default function ScanIn() {
     }
   }
 
-  async function handleFileComplaint() {
-    if (!batch || filingComplaint) return;
-    setFilingComplaint(true);
-    setComplaintError(null);
+  async function handleQuarantine() {
+    if (!batch || confirming) return;
+    setConfirming(true);
+    setConfirmError(null);
     try {
+      await confirmReceipt({
+        shipmentId: batch.shipmentId ?? '',
+        scannedBy: 'dock-1',
+        batches: [
+          {
+            batchId: batch.batchId,
+            qtyExpected: batch.qtyExpected ?? undefined,
+            qtyReceived: 0,
+            accepted: false,
+            conditionPhotoUrls: [],
+          },
+        ],
+      });
       const res = await fileComplaint({
         batchId: batch.batchId,
         shipmentId: batch.shipmentId ?? undefined,
         institutionId: 'self',
-        category,
-        description: description.trim() || undefined,
+        category: hasExcursion ? 'TEMP_DAMAGE' : 'QTY_MISMATCH',
+        description: 'Full shipment quarantined on receipt.',
       });
-      setComplaintId(res.complaintId);
+      setFiledComplaintId(res.complaintId);
+      setCommitted(true);
     } catch (e) {
-      setComplaintError((e as Error).message);
+      setConfirmError((e as Error).message);
     } finally {
-      setFilingComplaint(false);
+      setConfirming(false);
     }
   }
+
+  const state: 'PROPOSAL' | 'COMMITTED' = committed ? 'COMMITTED' : 'PROPOSAL';
+  const stateTint = state === 'COMMITTED' ? C.greenTint : C.amberTint;
+  const stateColor = state === 'COMMITTED' ? '#14532D' : C.amber;
+
+  const rows = batch
+    ? [
+        { label: 'Batch', note: 'Read from QR — pre-linked, nothing typed', value: batch.batchId, color: C.inkStrong },
+        { label: 'Shipment', note: 'Manifest matched on arrival', value: batch.shipmentId ?? '—', color: C.inkStrong },
+        {
+          label: 'Quantity expected',
+          note: 'From the supplier manifest',
+          value: batch.qtyExpected != null ? num(batch.qtyExpected) : '—',
+          color: C.inkStrong,
+        },
+        {
+          label: 'Quantity counted',
+          note: 'Proposal from tray photo — a human confirms',
+          value: num(qtyReceived),
+          color: short > 0 ? C.amber : C.inkStrong,
+        },
+      ]
+    : [];
 
   return (
     <>
       <PageHeader title="Scan-in" />
 
-      <div style={{ padding: 26, display: 'grid', gap: 18, maxWidth: 640 }}>
-        <Card style={{ padding: 16, animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              value={qr}
-              onChange={(e) => setQr(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleResolve();
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,0.9fr) minmax(0,1.1fr)', gap: 24, padding: '26px 26px 52px' }}>
+        {/* LEFT — scan */}
+        <Card style={{ animation: rise(0) }}>
+          <CardTitle right={<span style={{ font: `400 11px/1 ${MONO}`, color: C.inkFaint }}>camera ready</span>}>
+            Scan a batch QR
+          </CardTitle>
+          <div style={{ padding: 18 }}>
+            <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkFaint }}>
+              Batch, shipment and expected quantity arrive pre-linked. Nothing typed by hand.
+            </div>
+
+            <div
+              style={{
+                border: `1px solid ${C.border}`,
+                background: C.bg,
+                height: 224,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 14,
+                marginTop: 14,
               }}
-              placeholder="Scan or type batch id / QR value"
-              style={{ ...inputStyle, flex: 1 }}
-            />
-            <Button onClick={() => void handleResolve()} disabled={resolving || !qr.trim()}>
-              {resolving ? '…' : 'Resolve'}
-            </Button>
-          </div>
-          <div style={{ marginTop: 8, font: `400 11px/1.6 ${FONT}`, color: C.inkGhost }}>
-            Scan a Vayu QR or type a batch id.
+            >
+              <div style={{ width: 136, height: 136, position: 'relative' }}>
+                <span style={{ position: 'absolute', top: 0, left: 0, width: 26, height: 26, borderTop: `2px solid ${C.ink}`, borderLeft: `2px solid ${C.ink}` }} />
+                <span style={{ position: 'absolute', top: 0, right: 0, width: 26, height: 26, borderTop: `2px solid ${C.ink}`, borderRight: `2px solid ${C.ink}` }} />
+                <span style={{ position: 'absolute', bottom: 0, left: 0, width: 26, height: 26, borderBottom: `2px solid ${C.ink}`, borderLeft: `2px solid ${C.ink}` }} />
+                <span style={{ position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderBottom: `2px solid ${C.ink}`, borderRight: `2px solid ${C.ink}` }} />
+                <span
+                  style={{
+                    position: 'absolute',
+                    inset: 24,
+                    background:
+                      'repeating-linear-gradient(0deg,#171614 0 5px,transparent 5px 10px),repeating-linear-gradient(90deg,#171614 0 5px,transparent 5px 10px)',
+                    opacity: 0.72,
+                  }}
+                />
+              </div>
+              <div style={{ font: `500 11px/1 ${MONO}`, letterSpacing: '.06em', color: C.inkMuted }}>
+                {batch ? `${batch.batchId} RECOGNISED` : 'AWAITING SCAN'}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <input
+                value={qr}
+                onChange={(e) => setQr(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleResolve();
+                }}
+                placeholder="Scan or type batch id / QR value"
+                style={{ ...inputStyle, flex: 1 }}
+              />
+              <Button onClick={() => void handleResolve()} disabled={resolving || !qr.trim()}>
+                {resolving ? '…' : 'Resolve'}
+              </Button>
+            </div>
+
+            {resolveError && (
+              <div style={{ marginTop: 12 }}>
+                <ApiError error={resolveError} service="dhanvantari-api" />
+              </div>
+            )}
+            {notFound && (
+              <div style={{ marginTop: 12 }}>
+                <Empty>No batch matching &ldquo;{notFound}&rdquo; on any manifest received here.</Empty>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
+              <div style={{ border: `1px solid ${C.border}`, padding: '11px 12px' }}>
+                <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkFaint }}>Condition photos</div>
+                <div style={{ font: `600 19px/1 ${MONO}`, color: C.ink, marginTop: 6 }}>
+                  {batch ? 0 : '—'} attached
+                </div>
+              </div>
+              <div style={{ border: `1px solid ${C.border}`, padding: '11px 12px' }}>
+                <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkFaint }}>Seal check</div>
+                <div style={{ font: `600 16px/1 ${FONT}`, color: hasExcursion ? C.amber : C.ink, marginTop: 6 }}>
+                  {hasExcursion ? 'Tray damp' : batch ? 'Intact' : '—'}
+                </div>
+              </div>
+            </div>
           </div>
         </Card>
 
-        {resolveError && <ApiError error={resolveError} service="dhanvantari-api" />}
+        {/* RIGHT — confirm before commit */}
+        <Card style={{ animation: rise(60) }}>
+          <CardTitle
+            right={
+              <span
+                style={{
+                  font: `600 10px/1 ${FONT}`,
+                  letterSpacing: '.06em',
+                  padding: '3px 7px',
+                  borderRadius: 3,
+                  background: stateTint,
+                  color: stateColor,
+                  transition: 'background .3s ease, color .3s ease',
+                }}
+              >
+                {state}
+              </span>
+            }
+          >
+            Confirm before commit
+          </CardTitle>
 
-        {notFound && (
-          <Card>
-            <Empty>No batch matching &ldquo;{notFound}&rdquo; on any manifest received here.</Empty>
-          </Card>
-        )}
-
-        {batch && (
-          <Card>
-            <CardTitle>Resolved batch</CardTitle>
-            <div style={{ padding: 16, display: 'grid', gap: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ font: `600 14px/1.3 ${FONT}`, color: C.ink }}>{batch.drug?.name ?? 'Unknown drug'}</div>
-                  <div style={{ font: `500 12px/1.6 ${MONO}`, color: C.inkMuted, marginTop: 2 }}>
-                    {batch.batchId}
-                  </div>
-                </div>
-                {batch.coldChain && <Pill label="COLD CHAIN" />}
-              </div>
-              <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkMuted }}>
-                Qty expected: <span style={{ font: `500 12px/1.4 ${MONO}`, color: C.ink }}>{batch.qtyExpected ?? '—'}</span>
-              </div>
-
-              {batch.anomalyFlag && (
+          {!batch ? (
+            <Empty>Scan a batch to review before it commits.</Empty>
+          ) : (
+            <div>
+              {rows.map((r) => (
                 <div
+                  key={r.label}
                   style={{
-                    background: C.redTint,
-                    border: `1px solid ${C.red}`,
-                    borderRadius: 4,
-                    padding: '10px 14px',
-                    font: `500 12px/1.6 ${FONT}`,
-                    color: C.red,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 14,
+                    padding: '16px 18px',
+                    borderBottom: `1px solid ${C.borderSoft}`,
+                    borderLeft: committed ? `2px solid #15803D` : `2px dashed #D9BE85`,
+                    background: committed ? '#F1F8F3' : '#FFFCF4',
+                    transition: `background .4s ${EASE}, border-color .4s ${EASE}`,
                   }}
                 >
-                  This consignment breached its cold chain in transit. Quarantine before accepting.
+                  <div style={{ flex: 1 }}>
+                    <div style={{ font: `500 13px/1.35 ${FONT}`, color: C.ink }}>{r.label}</div>
+                    <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkFaint, marginTop: 3 }}>{r.note}</div>
+                  </div>
+                  <div style={{ font: `500 13px/1.5 ${MONO}`, color: r.color, textAlign: 'right' }}>{r.value}</div>
                 </div>
-              )}
+              ))}
+
+              <div style={{ padding: 20 }}>
+                {needsComplaint && !committed && (
+                  <div
+                    style={{
+                      borderLeft: `2px solid ${C.red}`,
+                      background: '#FDF6F5',
+                      padding: 12,
+                      font: `400 12px/1.6 ${FONT}`,
+                      color: '#8A2A22',
+                    }}
+                  >
+                    {short > 0
+                      ? `Quantity received is ${short} unit${short === 1 ? '' : 's'} short of the manifest`
+                      : 'This shipment carries a cold-chain excursion'}
+                    {hasExcursion && short > 0 ? ', and this shipment carries an excursion' : ''}. Accepting will
+                    pre-link a complaint to {batch.batchId} and {batch.shipmentId ?? 'this shipment'}.
+                  </div>
+                )}
+
+                {confirmError && (
+                  <div style={{ marginTop: 12 }}>
+                    <ApiError error={confirmError} service="dhanvantari-api" />
+                  </div>
+                )}
+
+                {committed && (
+                  <div
+                    style={{
+                      border: '1px solid #BBD9C4',
+                      background: '#F1F8F3',
+                      padding: 13,
+                      marginTop: 12,
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'flex-start',
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 22,
+                        height: 22,
+                        flex: '0 0 22px',
+                        borderRadius: 3,
+                        background: C.green,
+                        color: '#fff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        font: `600 12px/1 ${FONT}`,
+                        animation: `mtPop .4s ${EASE} both`,
+                      }}
+                    >
+                      ✓
+                    </span>
+                    <div>
+                      <div style={{ font: `600 12px/1.45 ${FONT}`, color: '#14532D' }}>
+                        Committed · {num(qtyReceived)} units received
+                      </div>
+                      <div style={{ font: `400 11px/1.6 ${FONT}`, color: '#166534', marginTop: 3 }}>
+                        {filedComplaintId ? `${filedComplaintId} filed against ${batch.batchId}` : 'No complaint required'}
+                        {batch.shipmentId ? ` and ${batch.shipmentId}` : ''} · supplier notified over webhook.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!committed && (
+                  <div style={{ display: 'flex', gap: 9, marginTop: 12 }}>
+                    <Button onClick={() => void handleCommit()} disabled={confirming}>
+                      {confirming ? '…' : `Accept ${num(qtyReceived)}${needsComplaint ? ' & file complaint' : ''}`}
+                    </Button>
+                    <Button variant="ghost" onClick={() => void handleQuarantine()} disabled={confirming}>
+                      Quarantine all
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
-          </Card>
-        )}
-
-        {batch && !confirmed && (
-          <Card>
-            <CardTitle>Receipt</CardTitle>
-            <div style={{ padding: 16, display: 'grid', gap: 12 }}>
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ font: `500 11px/1.4 ${FONT}`, color: C.inkFaint }}>Qty received</span>
-                <input
-                  type="number"
-                  value={qtyReceived}
-                  onChange={(e) => setQtyReceived(Number(e.target.value))}
-                  style={{ ...inputStyle, width: 140 }}
-                />
-              </label>
-              <div style={{ display: 'grid', gap: 6 }}>
-                <span style={{ font: `500 11px/1.4 ${FONT}`, color: C.inkFaint }}>Condition</span>
-                <Segmented options={ACCEPT_OPTIONS} value={decision} onChange={setDecision} />
-              </div>
-              {confirmError && <ApiError error={confirmError} service="dhanvantari-api" />}
-              <div>
-                <Button onClick={() => void handleConfirm()} disabled={confirming}>
-                  {confirming ? '…' : 'Confirm receipt'}
-                </Button>
-              </div>
-            </div>
-          </Card>
-        )}
-
-        {confirmed && (
-          <Card style={{ padding: 16 }}>
-            <div style={{ font: `600 13px/1.4 ${FONT}`, color: C.green }}>Receipt confirmed.</div>
-            {!showComplaint && !complaintId && (
-              <div style={{ marginTop: 10 }}>
-                <Button variant="ghost" onClick={() => setShowComplaint(true)}>
-                  File a complaint
-                </Button>
-              </div>
-            )}
-          </Card>
-        )}
-
-        {showComplaint && !complaintId && (
-          <Card>
-            <CardTitle>Complaint</CardTitle>
-            <div style={{ padding: 16, display: 'grid', gap: 12 }}>
-              <div style={{ display: 'grid', gap: 6 }}>
-                <span style={{ font: `500 11px/1.4 ${FONT}`, color: C.inkFaint }}>Category</span>
-                <Segmented options={COMPLAINT_CATEGORIES} value={category} onChange={setCategory} />
-              </div>
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ font: `500 11px/1.4 ${FONT}`, color: C.inkFaint }}>Description</span>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
-                  style={{ ...inputStyle, resize: 'vertical' as const }}
-                />
-              </label>
-              {complaintError && <ApiError error={complaintError} service="dhanvantari-api" />}
-              <div>
-                <Button onClick={() => void handleFileComplaint()} disabled={filingComplaint}>
-                  {filingComplaint ? '…' : 'File complaint'}
-                </Button>
-              </div>
-            </div>
-          </Card>
-        )}
-
-        {complaintId && (
-          <Card style={{ padding: 16 }}>
-            <div style={{ font: `600 13px/1.4 ${FONT}`, color: C.ink }}>Complaint filed.</div>
-            <div style={{ marginTop: 6, font: `500 12px/1.6 ${MONO}`, color: C.inkMuted }}>{complaintId}</div>
-          </Card>
-        )}
+          )}
+        </Card>
       </div>
     </>
   );

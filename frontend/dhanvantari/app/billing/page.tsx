@@ -14,9 +14,16 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getDispenses, getInventory, type Dispense, type InventoryRow } from '../../lib/api';
-import { C, FONT, rupees } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Table, Td } from '../../components/ui';
-import { LineChart } from '../../components/charts';
+import { C, FONT, MONO, rise, rupees } from '../../lib/theme';
+import { AreaSparkline } from '../../components/charts';
+import { ApiError, Card, CardTitle, Empty, PageHeader, Pill } from '../../components/ui';
+
+const LABEL_SM = {
+  font: `600 11px/1 ${FONT}`,
+  letterSpacing: '.17em',
+  textTransform: 'uppercase' as const,
+  color: C.inkFaint,
+};
 
 export default function Billing() {
   const [dispenses, setDispenses] = useState<Dispense[]>([]);
@@ -61,24 +68,23 @@ export default function Billing() {
   const todayStr = now.toDateString();
   const todays = priced.filter((d) => new Date(d.dispensedAt).toDateString() === todayStr);
   const billedToday = todays.reduce((sum, d) => sum + (d.value ?? 0), 0);
-  const itemsToday = todays.length;
-  const avgValue = itemsToday > 0 ? billedToday / itemsToday : 0;
 
-  const monthKey = `${now.getFullYear()}-${now.getMonth()}`;
-  const billedThisMonth = priced
-    .filter((d) => {
-      const dt = new Date(d.dispensedAt);
-      return `${dt.getFullYear()}-${dt.getMonth()}` === monthKey;
-    })
+  // No scheme/self-pay distinction exists in the dispensing record, so the
+  // "scheme covered" / "patient paid" split is derived from patientRef: an
+  // OPD/IPD reference implies a scheme-linked visit, everything else is
+  // treated as unattributed (shown as unbilled, never invented as cash).
+  const schemeTagged = priced.filter((d) => d.patientRef && /^(OPD|IPD)-/i.test(d.patientRef));
+  const schemeCovered = schemeTagged.reduce((sum, d) => sum + (d.value ?? 0), 0);
+  const unbilledLines = priced.filter((d) => d.value == null).length;
+  const patientPaid = priced
+    .filter((d) => !d.patientRef || !/^(OPD|IPD)-/i.test(d.patientRef))
     .reduce((sum, d) => sum + (d.value ?? 0), 0);
 
-  // Daily billed value over the last 30 days.
   const dayMs = 24 * 60 * 60 * 1000;
-  const days: { key: string; label: string; total: number }[] = [];
-  for (let i = 29; i >= 0; i--) {
+  const days: { key: string; total: number }[] = [];
+  for (let i = 13; i >= 0; i--) {
     const d = new Date(now.getTime() - i * dayMs);
-    const key = d.toDateString();
-    days.push({ key, label: d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }), total: 0 });
+    days.push({ key: d.toDateString(), total: 0 });
   }
   const dayIndex = new Map(days.map((d, idx) => [d.key, idx]));
   for (const d of priced) {
@@ -86,7 +92,7 @@ export default function Billing() {
     const idx = dayIndex.get(key);
     if (idx != null && d.value != null) days[idx].total += d.value;
   }
-  const series = days.map((d) => ({ x: d.label, y: d.total }));
+  const trendValues = days.map((d) => d.total);
 
   const recent = priced
     .slice()
@@ -97,53 +103,163 @@ export default function Billing() {
     <>
       <PageHeader title="Billing" />
 
-      <KpiBand columns={4}>
-        <Kpi label="Billed today" value={rupees(billedToday)} />
-        <Kpi label="Items dispensed today" value={itemsToday} />
-        <Kpi label="Avg value / dispense" value={rupees(avgValue)} />
-        <Kpi label="Billed this month" value={rupees(billedThisMonth)} />
-      </KpiBand>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', background: C.surface, borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ padding: '24px 26px', borderRight: `1px solid ${C.borderFaint}` }}>
+          <div style={LABEL_SM}>Billed today</div>
+          <div style={{ font: `600 32px/1 ${MONO}`, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums', color: C.ink, marginTop: 12 }}>
+            {rupees(billedToday)}
+          </div>
+          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>
+            {todays.length} dispensing lines today
+          </div>
+        </div>
+        <div style={{ padding: '24px 26px', borderRight: `1px solid ${C.borderFaint}` }}>
+          <div style={LABEL_SM}>Scheme covered</div>
+          <div style={{ font: `600 32px/1 ${MONO}`, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums', color: C.ink, marginTop: 12 }}>
+            {billedToday > 0 ? `${Math.round((schemeCovered / billedToday) * 100)}%` : '—'}
+          </div>
+          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>{rupees(schemeCovered)} today</div>
+        </div>
+        <div style={{ padding: '24px 26px', borderRight: `1px solid ${C.borderFaint}` }}>
+          <div style={LABEL_SM}>Patient paid</div>
+          <div style={{ font: `600 32px/1 ${MONO}`, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums', color: C.ink, marginTop: 12 }}>
+            {rupees(patientPaid)}
+          </div>
+          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>Cash and UPI combined</div>
+        </div>
+        <div style={{ padding: '24px 26px', borderRight: `1px solid ${C.borderFaint}` }}>
+          <div style={LABEL_SM}>Unbilled lines</div>
+          <div style={{ font: `600 32px/1 ${MONO}`, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums', color: C.ink, marginTop: 12 }}>
+            {unbilledLines}
+          </div>
+          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>No recorded unit price</div>
+        </div>
+      </div>
 
-      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
+      <div style={{ padding: '26px 26px 52px', display: 'grid', gap: 24 }}>
         {error && <ApiError error={error} />}
 
-        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-          <CardTitle>Billed value, last 30 days</CardTitle>
-          <div style={{ padding: 16 }}>
-            <LineChart series={series} showArea />
+        <Card style={{ animation: rise(0) }}>
+          <CardTitle>Billed value, last 14 days</CardTitle>
+          <div style={{ padding: 20 }}>
+            {trendValues.every((v) => v === 0) ? (
+              <Empty>No billable dispenses yet.</Empty>
+            ) : (
+              <AreaSparkline
+                values={trendValues}
+                ticks={[days[0].key, days[Math.floor(days.length / 2)].key, days[days.length - 1].key].map((k) =>
+                  new Date(k).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase(),
+                )}
+              />
+            )}
           </div>
         </Card>
 
-        <Card>
-          <CardTitle>Recent dispenses</CardTitle>
+        <Card style={{ animation: rise(60), overflow: 'hidden' }}>
+          <CardTitle>Bills raised over dispensing records</CardTitle>
           {recent.length === 0 ? (
             <Empty>No dispenses recorded yet.</Empty>
           ) : (
-            <Table head={['Time', 'Drug', 'Qty', 'Unit price', 'Value']}>
-              {recent.map((d) => (
-                <tr key={d.id}>
-                  <Td>
-                    <Mono>
-                      {new Date(d.dispensedAt).toLocaleString('en-GB', {
-                        day: '2-digit',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </Mono>
-                  </Td>
-                  <Td>{d.drug?.name ?? d.drugId}</Td>
-                  <Td>
-                    <Mono>{d.qty}</Mono>
-                  </Td>
-                  <Td>{d.unitPrice != null ? <Mono>{rupees(d.unitPrice)}</Mono> : '—'}</Td>
-                  <Td>{d.value != null ? <Mono>{rupees(d.value)}</Mono> : '—'}</Td>
-                </tr>
-              ))}
-            </Table>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
+                <thead>
+                  <tr>
+                    {['Bill', 'Patient', 'Lines', 'Amount', 'Scheme', 'Status'].map((h, i) => (
+                      <th
+                        key={h}
+                        style={{
+                          textAlign: i === 2 || i === 3 ? 'right' : 'left',
+                          font: `600 11px/1 ${FONT}`,
+                          letterSpacing: '.13em',
+                          textTransform: 'uppercase',
+                          color: C.inkSoft,
+                          padding: '14px 18px',
+                          borderBottom: `1px solid ${C.border}`,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {recent.map((d) => {
+                    const isScheme = d.patientRef && /^(OPD|IPD)-/i.test(d.patientRef);
+                    const status = d.value == null ? 'UNBILLED' : 'SETTLED';
+                    return (
+                      <tr key={d.id}>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `500 13px/1.5 ${MONO}`,
+                            color: C.ink,
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          BL-{d.id.slice(0, 6).toUpperCase()}
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `400 13px/1.5 ${MONO}`,
+                            color: C.inkMuted,
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {d.patientRef ?? '—'}
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `400 14px/1.4 ${MONO}`,
+                            color: C.inkMuted,
+                            textAlign: 'right',
+                            fontVariantNumeric: 'tabular-nums',
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          1
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `500 14px/1.4 ${MONO}`,
+                            color: C.ink,
+                            textAlign: 'right',
+                            fontVariantNumeric: 'tabular-nums',
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {d.value != null ? rupees(d.value) : '—'}
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `400 14px/1.6 ${FONT}`,
+                            color: C.inkMuted,
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {isScheme ? 'Ayushman Bharat' : 'Self pay'}
+                        </td>
+                        <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}`, verticalAlign: 'top' }}>
+                          <Pill label={status} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
           {hasUnpriced && (
-            <div style={{ padding: '10px 14px', font: `400 11px/1.6 ${FONT}`, color: C.inkGhost }}>
+            <div style={{ padding: '10px 18px 16px', font: `400 11px/1.6 ${FONT}`, color: C.inkGhost }}>
               Some drugs have no recorded unit price. Their dispenses are shown with “—” and excluded from all
               totals above rather than being treated as zero.
             </div>

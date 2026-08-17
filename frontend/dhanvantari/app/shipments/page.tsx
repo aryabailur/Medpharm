@@ -12,8 +12,9 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { getIncoming, type IncomingShipment } from '../../lib/api';
-import { C, FONT, MONO } from '../../lib/theme';
-import { ApiError, Card, Empty, Kpi, KpiBand, Meter, Mono, PageHeader, Pill, Table, Td } from '../../components/ui';
+import { C, FONT, MONO, rise } from '../../lib/theme';
+import { ApiError, Card, CardTitle, Empty, PageHeader, Pill, Table, Td } from '../../components/ui';
+import { Meter } from '../../components/charts';
 
 const IN_TRANSIT = ['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'];
 
@@ -49,81 +50,66 @@ export default function Shipments() {
     );
   }
 
-  const inTransit = items.filter((s) => IN_TRANSIT.includes(s.status)).length;
-  const coldChain = items.filter((s) => s.coldChain).length;
-  const breaching = items.filter((s) => s.anomalyFlag && s.status !== 'DELIVERED');
+  const active = items.filter((s) => s.status !== 'DELIVERED').length;
 
   return (
     <>
       <PageHeader title="Incoming Shipments" />
 
-      {breaching.length > 0 && (
-        <div
-          style={{
-            background: C.redTint,
-            border: `1px solid ${C.red}`,
-            borderRadius: 4,
-            padding: '14px 18px',
-            margin: 0,
-          }}
-        >
-          <div style={{ font: `700 13px/1.4 ${FONT}`, color: C.red }}>Cold-chain breach reported in transit</div>
-          <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
-            {breaching.map((s) => (
-              <div key={s.id} style={{ font: `500 12px/1.5 ${MONO}`, color: C.red }}>
-                {s.id.slice(0, 12)} · last reading {s.lastTempC != null ? `${s.lastTempC.toFixed(1)} °C` : '—'} · ETA{' '}
-                {fmtDate(s.etaAt)}
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 8, font: `400 12px/1.6 ${FONT}`, color: C.inkMuted }}>
-            Quarantine on receipt and photograph the vial tray before scan-in.
-          </div>
-        </div>
-      )}
-
-      <KpiBand columns={4}>
-        <Kpi label="Total incoming" value={items.length} />
-        <Kpi label="In transit" value={inTransit} deltaColor={C.accent} />
-        <Kpi label="Cold chain" value={coldChain} deltaColor={C.accent} />
-        <Kpi
-          label="With excursion"
-          value={items.filter((s) => s.anomalyFlag).length}
-          deltaColor={C.red}
-        />
-      </KpiBand>
-
-      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
-        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
+      <div style={{ padding: '26px 26px 52px' }}>
+        <Card style={{ animation: rise(0) }}>
+          <CardTitle
+            right={
+              <span style={{ font: `400 12px/1 ${MONO}`, color: C.inkFaint }}>{active} active</span>
+            }
+          >
+            Incoming shipments
+          </CardTitle>
           {items.length === 0 ? (
             <Empty>Nothing inbound.</Empty>
           ) : (
-            <Table head={['Shipment', 'Status', 'Cold chain', 'Last temp', 'Progress', 'ETA', 'Batches']}>
+            <Table head={['Shipment', 'Contents', 'Progress', 'Last temp', 'ETA', 'Status']}>
               {items.map((s) => {
-                const tempColor = s.anomalyFlag ? C.red : s.coldChain ? C.accent : C.inkMuted;
+                const pct = Math.round((s.progressPct ?? 0) * 100);
+                const tempColor = s.lastTempC == null ? '#A89F9B' : s.anomalyFlag ? C.red : C.blue;
                 return (
                   <tr key={s.id}>
                     <Td>
                       <Link href={`/tracking?shipment=${s.id}`} style={{ textDecoration: 'none' }}>
-                        <Mono color={C.accent}>{s.id.slice(0, 12)}</Mono>
+                        <span
+                          style={{
+                            border: 0,
+                            background: 'transparent',
+                            font: `500 12px/1 ${MONO}`,
+                            color: C.ink,
+                            borderBottom: `1px dotted ${C.inkGhost}`,
+                          }}
+                        >
+                          {s.id.slice(0, 12)}
+                        </span>
                       </Link>
-                    </Td>
-                    <Td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Pill label={s.status} />
-                        {s.anomalyFlag && <Pill label="EXCURSION" color={C.red} tint={C.redTint} />}
+                      <div style={{ font: `400 11px/1.4 ${MONO}`, color: C.inkFaint, marginTop: 3 }}>
+                        {s.supplyOrderId ? s.supplyOrderId.slice(0, 12) : '—'}
                       </div>
                     </Td>
-                    <Td>{s.coldChain ? <Pill label="COLD" /> : '—'}</Td>
                     <Td>
-                      <Mono color={tempColor}>{s.lastTempC != null ? `${s.lastTempC.toFixed(1)} °C` : '—'}</Mono>
+                      {s.coldChain ? 'Cold chain' : 'Ambient'} · {s.batchCount ?? 0} batch
+                      {(s.batchCount ?? 0) === 1 ? '' : 'es'}
                     </Td>
                     <Td>
-                      <Meter pct={(s.progressPct ?? 0) * 100} color={s.anomalyFlag ? C.red : undefined} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <Meter pct={pct} width={72} color={s.anomalyFlag ? C.red : undefined} />
+                        <span style={{ font: `400 11px/1 ${MONO}`, color: C.inkFaint }}>{pct}%</span>
+                      </div>
                     </Td>
-                    <Td>{fmtDate(s.etaAt)}</Td>
                     <Td>
-                      <Mono>{s.batchCount ?? 0}</Mono>
+                      <span style={{ font: `500 13px/1.5 ${MONO}`, color: tempColor }}>
+                        {s.lastTempC != null ? `${s.lastTempC.toFixed(1)} °C` : '—'}
+                      </span>
+                    </Td>
+                    <Td>{s.status === 'DELIVERED' ? 'Delivered' : fmtDate(s.etaAt)}</Td>
+                    <Td>
+                      <Pill label={s.anomalyFlag ? 'EXCURSION' : s.status} />
                     </Td>
                   </tr>
                 );

@@ -8,12 +8,13 @@
  * hooks live in <Inner/> and this file's default export is just the wrapper.
  */
 
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { getIncoming, streamShipment, type IncomingShipment } from '../../lib/api';
-import { C, FONT, MONO } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Pill } from '../../components/ui';
+import { C, FONT, MONO, rise } from '../../lib/theme';
+import { ApiError, Card, CardTitle, Empty, Mono, PageHeader, Pill, Table, Td } from '../../components/ui';
+import { ColumnChart, Legend, RouteMap, StepRail, TemperatureChart } from '../../components/charts';
 
 const MIN_C = 2;
 const MAX_C = 8;
@@ -27,6 +28,17 @@ interface ExcursionEvent {
   severity: string;
   peakTempC: number | null;
   durationMin: number | null;
+  startTs?: string;
+  endTs?: string;
+}
+
+function fmtTime(ts: string): string {
+  return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDate(d: string | null): string {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 function Inner() {
@@ -134,6 +146,8 @@ function Inner() {
           severity: data.severity ?? 'UNKNOWN',
           peakTempC: data.peakTempC ?? data.maxTempC ?? null,
           durationMin: data.durationMin ?? null,
+          startTs: data.startTs,
+          endTs: data.endTs,
         });
         setDetail((prev) => (prev ? { ...prev, anomalyFlag: true } : prev));
       } catch {
@@ -152,11 +166,102 @@ function Inner() {
     return aAnom - bAnom;
   });
 
+  // Derive excursion bands as 0..1 fractions across the live telemetry series.
+  const bands = useMemo(() => {
+    if (!excursion || points.length === 0) return [];
+    const t0 = new Date(points[0]!.ts).getTime();
+    const t1 = new Date(points[points.length - 1]!.ts).getTime();
+    const span = t1 - t0 || 1;
+    const startT = excursion.startTs ? new Date(excursion.startTs).getTime() : t0;
+    const endT = excursion.endTs ? new Date(excursion.endTs).getTime() : t1;
+    const from = Math.max(0, Math.min(1, (startT - t0) / span));
+    const to = Math.max(0, Math.min(1, (endT - t0) / span));
+    return [{ from, to, label: `${excursion.severity} · ${excursion.durationMin ?? '—'} min` }];
+  }, [excursion, points]);
+
+  const ticks = useMemo(() => {
+    if (points.length === 0) return [];
+    const n = points.length;
+    const idxs = [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4), n - 1];
+    const seen = new Set<number>();
+    return idxs
+      .filter((i) => !seen.has(i) && seen.add(i))
+      .map((i) => fmtTime(points[i]!.ts));
+  }, [points]);
+
+  // Lifecycle steps derived from real shipment/excursion state.
+  const steps = useMemo(() => {
+    if (!detail) return [];
+    const hasExcursion = !!excursion || detail.anomalyFlag;
+    const delivered = detail.status === 'DELIVERED';
+    const outForDelivery = detail.status === 'OUT_FOR_DELIVERY' || delivered;
+    const inTransit = ['IN_TRANSIT', 'DISPATCHED', 'OUT_FOR_DELIVERY'].includes(detail.status) || delivered;
+
+    const rows: Array<{ label: string; time: string; dot: string; line?: string; fg?: string; done: boolean }> = [
+      { label: 'Order approved', time: detail.supplyOrderId ? detail.supplyOrderId.slice(0, 12) : '—', dot: C.green, done: true },
+      { label: 'Dispatched', time: 'manifest received', dot: C.green, done: true },
+      {
+        label: hasExcursion ? 'Cold-chain excursion' : 'In transit',
+        time: hasExcursion
+          ? `${excursion?.severity ?? 'EXCURSION'}${excursion?.durationMin != null ? ` · ${excursion.durationMin} min` : ''}`
+          : `${Math.round((detail.progressPct ?? 0) * 100)}% of route`,
+        dot: hasExcursion ? C.amber : C.blue,
+        done: true,
+      },
+      {
+        label: 'Out for delivery',
+        time: outForDelivery ? 'under way' : `expected ${fmtDate(detail.etaAt)}`,
+        dot: outForDelivery ? C.blue : '#C9C2BD',
+        done: outForDelivery,
+      },
+      {
+        label: 'Delivered',
+        time: delivered ? 'received at dock' : `ETA ${fmtDate(detail.etaAt)}`,
+        dot: delivered ? C.green : '#C9C2BD',
+        done: delivered,
+      },
+    ];
+
+    // Colour each connector with the NEXT step's state; dim rows not yet reached.
+    return rows.map((r, i) => {
+      const next = rows[i + 1];
+      const nextDone = next ? next.done : true;
+      return {
+        label: r.label,
+        time: r.time,
+        dot: r.done ? r.dot : C.inkGhost,
+        fg: r.done ? C.ink : '#A89F9B',
+        line: i < rows.length - 1 ? (nextDone ? (rows[i + 1]!.dot === '#C9C2BD' ? C.inkGhost : rows[i + 1]!.dot) : C.borderSoft) : undefined,
+      };
+    });
+  }, [detail, excursion]);
+
+  const severityCounts = useMemo(() => {
+    const counts: Record<string, number> = { MINOR: 0, MAJOR: 0, CRITICAL: 0 };
+    if (excursion && counts[excursion.severity] != null) counts[excursion.severity]! += 1;
+    return counts;
+  }, [excursion]);
+
+  const excursionHistoryRows = useMemo(() => {
+    if (!excursion || !detail) return [];
+    return [
+      {
+        shipmentId: detail.id,
+        window: excursion.startTs && excursion.endTs ? `${fmtTime(excursion.startTs)}–${fmtTime(excursion.endTs)}` : '—',
+        peak: excursion.peakTempC != null ? `${excursion.peakTempC.toFixed(1)} °C` : '—',
+        duration: excursion.durationMin != null ? `${excursion.durationMin} min` : '—',
+        severity: excursion.severity,
+        outcome: 'Awaiting arrival · quarantine on receipt',
+      },
+    ];
+  }, [excursion, detail]);
+
   return (
     <>
       <PageHeader title="Tracking + Excursions" />
-      <div style={{ display: 'flex', minHeight: 'calc(100vh - 73px)' }}>
-        <div style={{ width: 250, flex: '0 0 250px', borderRight: `1px solid ${C.border}`, overflowY: 'auto' }}>
+
+      <div style={{ display: 'flex' }}>
+        <div style={{ width: 220, flex: '0 0 220px', borderRight: `1px solid ${C.border}`, overflowY: 'auto' }}>
           <CardTitle>Shipments</CardTitle>
           {listError ? (
             <div style={{ padding: 14 }}>
@@ -167,7 +272,7 @@ function Inner() {
           ) : (
             <div>
               {sorted.map((s) => {
-                const active = s.id === selectedId;
+                const activeRow = s.id === selectedId;
                 return (
                   <button
                     key={s.id}
@@ -179,14 +284,14 @@ function Inner() {
                       padding: '10px 14px',
                       border: 'none',
                       borderBottom: `1px solid ${C.borderSoft}`,
-                      background: active ? C.accentTint : 'transparent',
+                      background: activeRow ? C.accentTint : 'transparent',
                       cursor: 'pointer',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Mono color={active ? C.accent : C.ink}>{s.id.slice(0, 12)}</Mono>
+                      <Mono color={activeRow ? C.accent : C.ink}>{s.id.slice(0, 12)}</Mono>
                       {s.anomalyFlag && (
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.red, display: 'inline-block' }} />
+                        <span style={{ width: 6, height: 6, background: C.red, display: 'inline-block' }} />
                       )}
                     </div>
                     <div style={{ marginTop: 4 }}>
@@ -199,52 +304,171 @@ function Inner() {
           )}
         </div>
 
-        <div style={{ flex: 1, display: 'grid', alignContent: 'start' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           {!selectedId || !detail ? (
             <div style={{ padding: 26 }}>
               <Empty>Select a shipment.</Empty>
             </div>
           ) : (
             <>
-              <KpiBand columns={4}>
-                <Kpi
-                  label="Current temp"
-                  value={detail.coldChain ? (detail.lastTempC != null ? `${detail.lastTempC.toFixed(1)}°C` : '—') : 'ambient'}
-                  deltaColor={
-                    detail.lastTempC != null && (detail.lastTempC < MIN_C || detail.lastTempC > MAX_C) ? C.red : C.accent
-                  }
-                />
-                <Kpi label="Progress" value={detail.progressPct != null ? `${Math.round(detail.progressPct * 100)}%` : '—'} />
-                <Kpi label="Status" value={detail.status} />
-                <Kpi label="ETA" value={detail.etaAt ? new Date(detail.etaAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'} />
-              </KpiBand>
+              {/* Block 1: route + status */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0,1.5fr) minmax(0,1fr)',
+                  gap: 24,
+                  padding: '26px 26px 0',
+                }}
+              >
+                <Card style={{ overflow: 'hidden', animation: rise(0) }}>
+                  <CardTitle
+                    right={
+                      detail.anomalyFlag || excursion ? (
+                        <span
+                          style={{
+                            font: `600 10px/1 ${FONT}`,
+                            letterSpacing: '.06em',
+                            background: C.amberTint,
+                            color: C.amber,
+                            padding: '3px 7px',
+                            borderRadius: 3,
+                          }}
+                        >
+                          EXCURSION
+                        </span>
+                      ) : null
+                    }
+                  >
+                    {detail.id.slice(0, 12)} · inbound
+                  </CardTitle>
+                  <RouteMap
+                    progress={detail.progressPct ?? 0}
+                    origin="ORIGIN"
+                    destination="THIS INSTITUTION"
+                    now={live ? `NOW · ${Math.round((detail.progressPct ?? 0) * 100)}%` : undefined}
+                    incident={excursion ? `EXCURSION${excursion.durationMin != null ? ` ${excursion.durationMin}m` : ''}` : undefined}
+                    stats={[
+                      { label: 'ETA', value: detail.etaAt ? fmtDate(detail.etaAt) : '—' },
+                      {
+                        label: 'Arrives in',
+                        value:
+                          detail.etaAt
+                            ? (() => {
+                                const ms = new Date(detail.etaAt).getTime() - Date.now();
+                                if (ms <= 0) return 'due';
+                                const h = Math.floor(ms / 3600000);
+                                const m = Math.round((ms % 3600000) / 60000);
+                                return h > 0 ? `${h}h ${m}m` : `${m}m`;
+                              })()
+                            : '—',
+                      },
+                    ]}
+                  />
+                </Card>
 
-              <div style={{ padding: '26px 26px 0', display: 'flex', justifyContent: 'flex-end' }}>
-                {live && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 6, height: 6, background: C.green, display: 'inline-block' }} />
-                    <span style={{ font: `600 10px/1 ${MONO}`, color: C.green, letterSpacing: '.06em' }}>LIVE</span>
-                    <span style={{ font: `400 10px/1 ${MONO}`, color: C.inkGhost }}>{eventCount} events</span>
+                <Card style={{ animation: rise(60) }}>
+                  <CardTitle
+                    right={
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
+                          Last temp
+                        </div>
+                        <div
+                          key={detail.lastTempC ?? 'none'}
+                          style={{
+                            font: `600 26px/1 ${MONO}`,
+                            color: C.ink,
+                            marginTop: 4,
+                            display: 'inline-block',
+                            fontVariantNumeric: 'tabular-nums',
+                            animation: 'mtPop .45s cubic-bezier(.16,1,.3,1) both',
+                          }}
+                        >
+                          {detail.coldChain
+                            ? detail.lastTempC != null
+                              ? `${detail.lastTempC.toFixed(1)} °C`
+                              : '—'
+                            : 'ambient'}
+                        </div>
+                      </div>
+                    }
+                  >
+                    Status
+                  </CardTitle>
+                  <div style={{ padding: '20px 20px 6px' }}>
+                    {steps.length === 0 ? <Empty>No lifecycle data.</Empty> : <StepRail steps={steps} />}
                   </div>
-                )}
+                </Card>
               </div>
 
-              <div style={{ padding: 26, display: 'grid', gap: 18 }}>
-                {excursion && (
-                  <Card style={{ padding: 14, background: C.redTint, borderColor: C.red }}>
-                    <div style={{ font: `700 13px/1.4 ${FONT}`, color: C.red }}>Excursion detected</div>
-                    <div style={{ marginTop: 6, font: `500 12px/1.6 ${MONO}`, color: C.red }}>
-                      Severity {excursion.severity}
-                      {excursion.peakTempC != null && ` · peak ${excursion.peakTempC.toFixed(1)}°C`}
-                      {excursion.durationMin != null && ` · ${excursion.durationMin} min`}
-                    </div>
-                  </Card>
-                )}
+              {/* Block 2: temperature */}
+              <div style={{ padding: '26px 26px 0' }}>
+                <Card style={{ animation: rise(100) }}>
+                  <CardTitle
+                    right={
+                      <Legend
+                        items={[
+                          { label: 'Reading', color: C.accent },
+                          { label: 'Out of band', color: C.red, kind: 'thin' },
+                          { label: 'In band', color: C.bandFill, kind: 'band' },
+                        ]}
+                      />
+                    }
+                  >
+                    Temperature · 2–8 °C band
+                  </CardTitle>
+                  <div style={{ padding: 20 }}>
+                    <TemperatureChart readings={points} minC={MIN_C} maxC={MAX_C} bands={bands} ticks={ticks} />
+                  </div>
+                </Card>
+              </div>
 
-                <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-                  <CardTitle>Temperature trace</CardTitle>
-                  <div style={{ padding: 14 }}>
-                    <TemperatureChart points={points} />
+              {/* Block 3: excursion history + by severity */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0,1fr) 300px',
+                  gap: 24,
+                  padding: '26px 26px 52px',
+                }}
+              >
+                <Card>
+                  <CardTitle>Excursion history</CardTitle>
+                  {excursionHistoryRows.length === 0 ? (
+                    <Empty>No excursions recorded for this shipment.</Empty>
+                  ) : (
+                    <Table head={['Shipment', 'Window', 'Peak', 'Duration', 'Severity', 'Outcome']}>
+                      {excursionHistoryRows.map((r, i) => (
+                        <tr key={i}>
+                          <Td>
+                            <Mono>{r.shipmentId.slice(0, 12)}</Mono>
+                          </Td>
+                          <Td>{r.window}</Td>
+                          <Td>
+                            <Mono color={C.red}>{r.peak}</Mono>
+                          </Td>
+                          <Td>{r.duration}</Td>
+                          <Td>
+                            <Pill label={r.severity} />
+                          </Td>
+                          <Td>{r.outcome}</Td>
+                        </tr>
+                      ))}
+                    </Table>
+                  )}
+                </Card>
+
+                <Card style={{ alignSelf: 'start' }}>
+                  <CardTitle>By severity</CardTitle>
+                  <div style={{ padding: 18 }}>
+                    <ColumnChart
+                      bars={[
+                        { label: 'MINOR', count: severityCounts.MINOR ?? 0, color: C.grey },
+                        { label: 'MAJOR', count: severityCounts.MAJOR ?? 0, color: C.amber },
+                        { label: 'CRITICAL', count: severityCounts.CRITICAL ?? 0, color: C.red },
+                      ]}
+                      footnote="Counted from excursion events observed live on this shipment's stream."
+                    />
                   </div>
                 </Card>
               </div>
@@ -253,62 +477,6 @@ function Inner() {
         </div>
       </div>
     </>
-  );
-}
-
-function TemperatureChart({ points }: { points: TempPoint[] }) {
-  if (points.length === 0) {
-    return <Empty>No temperature readings yet.</Empty>;
-  }
-
-  const W = 900;
-  const H = 200;
-  const padL = 34;
-  const padR = 14;
-  const padT = 14;
-  const padB = 22;
-  const innerW = W - padL - padR;
-  const innerH = H - padT - padB;
-
-  const values = points.map((p) => p.tempC);
-  const dataMin = Math.min(...values, MIN_C);
-  const dataMax = Math.max(...values, MAX_C);
-  const span = dataMax - dataMin || 1;
-  const scaleY = (v: number) => padT + innerH - ((v - dataMin) / span) * innerH;
-
-  const n = points.length;
-  const xAt = (i: number) => (n === 1 ? padL + innerW / 2 : padL + (i / (n - 1)) * innerW);
-
-  const linePoints = points.map((p, i) => `${xAt(i)},${scaleY(p.tempC)}`).join(' ');
-
-  return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      <line x1={padL} x2={padL + innerW} y1={scaleY(MIN_C)} y2={scaleY(MIN_C)} stroke={C.accent} strokeWidth={1} strokeDasharray="4 3" />
-      <line x1={padL} x2={padL + innerW} y1={scaleY(MAX_C)} y2={scaleY(MAX_C)} stroke={C.accent} strokeWidth={1} strokeDasharray="4 3" />
-      <text x={padL + innerW} y={scaleY(MIN_C) - 3} textAnchor="end" style={{ font: `500 9px ${MONO}`, fill: C.accent }}>
-        2°C
-      </text>
-      <text x={padL + innerW} y={scaleY(MAX_C) - 3} textAnchor="end" style={{ font: `500 9px ${MONO}`, fill: C.accent }}>
-        8°C
-      </text>
-
-      {n === 1 ? (
-        <circle cx={xAt(0)} cy={scaleY(points[0].tempC)} r={3} fill={C.ink} />
-      ) : (
-        <polyline points={linePoints} fill="none" stroke={C.ink} strokeWidth={1.5} />
-      )}
-
-      {points.map((p, i) =>
-        p.tempC < MIN_C || p.tempC > MAX_C ? <circle key={i} cx={xAt(i)} cy={scaleY(p.tempC)} r={3.5} fill={C.red} /> : null,
-      )}
-
-      <text x={padL} y={H - 4} style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
-        {new Date(points[0].ts).toLocaleTimeString('en-GB')}
-      </text>
-      <text x={padL + innerW} y={H - 4} textAnchor="end" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
-        {new Date(points[n - 1].ts).toLocaleTimeString('en-GB')}
-      </text>
-    </svg>
   );
 }
 

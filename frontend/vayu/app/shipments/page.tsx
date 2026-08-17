@@ -5,108 +5,190 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
 
-import { getShipments, type Shipment } from '../../lib/api';
-import { C, MONO } from '../../lib/theme';
-import { ApiError, Card, Empty, Kpi, KpiBand, Meter, Mono, PageHeader, Pill, Segmented, Table, Td } from '../../components/ui';
+import { getShipment, getShipments, type Batch, type Drug, type Shipment } from '../../lib/api';
+import { C, FONT, MONO, rise } from '../../lib/theme';
+import { ApiError, Card, Empty, Pill } from '../../components/ui';
 
-const FILTERS = [
-  { value: '', label: 'All' },
-  { value: 'DRAFT', label: 'Draft' },
-  { value: 'DISPATCHED', label: 'Dispatched' },
-  { value: 'IN_TRANSIT', label: 'In transit' },
-  { value: 'OUT_FOR_DELIVERY', label: 'Out for delivery' },
-  { value: 'DELIVERED', label: 'Delivered' },
-  { value: 'EXCEPTION', label: 'Exception' },
-];
+/** getShipment's detail response nests full batch + drug rows, not the list-view pick. */
+type FullShipmentBatch = { batch: Batch & { drug?: Drug } };
+type FullShipment = Shipment & { batches?: FullShipmentBatch[] };
 
 export default function Dispatch() {
-  const [filter, setFilter] = useState('');
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<FullShipment | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const q = filter ? `?status=${filter}&take=100` : '?take=100';
-      const res = await getShipments(q);
+      const res = await getShipments('?take=100');
       setShipments(res.items);
       setError(null);
+      if (!selectedId && res.items.length > 0) setSelectedId(res.items[0]!.id);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [filter]);
+  }, [selectedId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const inFlight = shipments.filter((s) =>
-    ['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(s.status),
-  ).length;
-  const coldChain = shipments.filter((s) => s.coldChain).length;
-  const withExcursions = shipments.filter((s) => s.excursionCount > 0).length;
-  const delivered = shipments.filter((s) => s.status === 'DELIVERED').length;
+  useEffect(() => {
+    if (!selectedId) {
+      setSelected(null);
+      return;
+    }
+    (async () => {
+      try {
+        const full = await getShipment(selectedId);
+        setSelected(full as unknown as FullShipment);
+      } catch {
+        setSelected(null);
+      }
+    })();
+  }, [selectedId]);
+
+  const coldChainBatch = selected?.batches?.find((b) => b.batch.drug?.coldChain);
+  const setpoint = coldChainBatch?.batch.drug
+    ? `${coldChainBatch.batch.drug.minTempC}–${coldChainBatch.batch.drug.maxTempC}°C`
+    : null;
 
   return (
-    <>
-      <PageHeader
-        title="Shipment Dispatch"
-        right={<Segmented options={FILTERS} value={filter} onChange={setFilter} />}
-      />
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 340px', gap: 24, padding: '26px 26px 52px' }}>
+      {/* LEFT — Dispatch */}
+      <section style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, overflowX: 'auto', animation: rise(0) }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '17px 18px', borderBottom: `1px solid ${C.border}`, background: C.surfaceAlt }}>
+          <span style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
+            Dispatch
+          </span>
+          <div style={{ flex: 1 }} />
+          <button
+            style={{ border: 0, background: C.ink, color: C.bg, font: `500 12px/1 ${FONT}`, padding: '8px 13px', borderRadius: 4, cursor: 'pointer' }}
+          >
+            New dispatch
+          </button>
+        </div>
 
-      <KpiBand columns={4}>
-        <Kpi label="In flight" value={inFlight} deltaColor={C.accent} />
-        <Kpi label="Cold chain" value={coldChain} />
-        <Kpi label="With excursions" value={withExcursions} deltaColor={withExcursions ? C.red : C.grey} />
-        <Kpi label="Delivered" value={delivered} deltaColor={C.green} />
-      </KpiBand>
+        {error && (
+          <div style={{ padding: 16 }}>
+            <ApiError error={error} />
+          </div>
+        )}
 
-      <div style={{ padding: 26, display: 'grid', gap: 18 }}>
-        {error && <ApiError error={error} />}
+        {shipments.length === 0 ? (
+          <Empty>No shipments on record.</Empty>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
+            <thead>
+              <tr>
+                {['Shipment', 'Destination', 'Manifest', 'Vehicle', 'Status'].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: 'left',
+                      font: `600 11px/1 ${FONT}`,
+                      letterSpacing: '.13em',
+                      textTransform: 'uppercase',
+                      color: C.inkSoft,
+                      padding: '14px 18px',
+                      borderBottom: `1px solid ${C.border}`,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {shipments.map((s) => {
+                const manifestCount = s._count?.batches ?? 0;
+                return (
+                  <tr
+                    key={s.id}
+                    onClick={() => setSelectedId(s.id)}
+                    style={{ cursor: 'pointer', background: selectedId === s.id ? C.surfaceAlt : 'transparent' }}
+                  >
+                    <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}`, verticalAlign: 'top' }}>
+                      <span style={{ font: `500 12px/1 ${MONO}`, color: C.ink, borderBottom: `1px dotted ${C.inkGhost}` }}>
+                        {s.id.slice(0, 8)}
+                      </span>
+                      <div style={{ font: `400 11px/1.3 ${MONO}`, color: C.inkSoft, marginTop: 5 }}>{s.supplyOrderId.slice(0, 8)}</div>
+                    </td>
+                    <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}`, font: `400 14px/1.6 ${FONT}`, color: C.ink, verticalAlign: 'top' }}>
+                      {s.supplyOrder?.institution?.name ?? 'Unknown institution'}
+                    </td>
+                    <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}`, font: `400 14px/1.6 ${FONT}`, color: C.inkMuted, verticalAlign: 'top' }}>
+                      {manifestCount} batch{manifestCount === 1 ? '' : 'es'}
+                    </td>
+                    <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}`, font: `400 13px/1.5 ${MONO}`, color: C.inkMuted, verticalAlign: 'top' }}>
+                      {s.coldChain ? 'reefer' : 'ambient'}
+                    </td>
+                    <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}`, verticalAlign: 'top' }}>
+                      <Pill label={s.status} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
 
-        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-          {shipments.length === 0 ? (
-            <Empty>No shipments match this filter.</Empty>
-          ) : (
-            <Table head={['Shipment', 'Destination', 'Progress', 'Temp', 'Excursions', 'Status']}>
-              {shipments.map((s) => (
-                <tr key={s.id}>
-                  <Td>
-                    <Link href={`/telemetry?shipment=${s.id}`} style={{ textDecoration: 'none' }}>
-                      <Mono color={C.accent}>{s.id.slice(0, 8)}</Mono>
-                    </Link>
-                  </Td>
-                  <Td>{s.supplyOrder?.institution?.name ?? 'Unknown institution'}</Td>
-                  <Td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Meter pct={(s.progressPct ?? 0) * 100} />
-                      <Mono>{s.progressPct != null ? `${Math.round(s.progressPct * 100)}%` : '—'}</Mono>
-                    </div>
-                  </Td>
-                  <Td>
-                    {s.coldChain ? (
-                      <Mono color={C.accent}>
-                        {s.lastTempC != null ? `${s.lastTempC.toFixed(1)} °C` : '—'}
-                      </Mono>
-                    ) : (
-                      <Mono color={C.inkGhost}>ambient</Mono>
-                    )}
-                  </Td>
-                  <Td>
-                    <Mono color={s.excursionCount > 0 ? C.red : C.inkGhost}>
-                      {s.excursionCount > 0 ? s.excursionCount : '—'}
-                    </Mono>
-                  </Td>
-                  <Td>
-                    <Pill label={s.status} />
-                  </Td>
-                </tr>
-              ))}
-            </Table>
-          )}
-        </Card>
-      </div>
-    </>
+      {/* RIGHT — Manifest */}
+      <aside style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, alignSelf: 'start', animation: rise(60) }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '17px 18px', borderBottom: `1px solid ${C.border}`, background: C.surfaceAlt }}>
+          <span style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
+            Manifest · {selected ? selected.id.slice(0, 8) : '—'}
+          </span>
+        </div>
+        {!selected ? (
+          <Empty>Select a shipment to see its manifest.</Empty>
+        ) : (
+          <div style={{ padding: 20 }}>
+            <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint }}>
+              {selected.supplyOrder?.institution?.district ?? 'Unknown route'} · {selected.coldChain ? `cold chain ${setpoint ?? ''}` : 'ambient'}
+            </div>
+
+            {(selected.batches ?? []).length === 0 ? (
+              <Empty>No batches loaded on this manifest.</Empty>
+            ) : (
+              (selected.batches ?? []).map(({ batch }) => (
+                <div key={batch.id} style={{ borderTop: `1px solid ${C.borderSoft}`, padding: '11px 0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                    <span style={{ font: `500 13px/1.5 ${FONT}`, color: C.ink }}>{batch.drug?.name ?? 'Unknown drug'}</span>
+                    <span style={{ font: `600 13px/1 ${MONO}`, color: C.ink }}>{batch.quantity.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div style={{ font: `400 11px/1.5 ${MONO}`, color: C.inkFaint, marginTop: 5 }}>
+                    lot {batch.lotNumber} · exp {new Date(batch.expiryDate).toLocaleDateString('en-GB')}
+                  </div>
+                </div>
+              ))
+            )}
+
+            <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 6, paddingTop: 12 }}>
+              <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
+                Vehicle &amp; route
+              </div>
+              <div style={{ font: `400 12px/1.7 ${MONO}`, color: C.inkMuted, marginTop: 8 }}>
+                {selected.coldChain ? `Reefer, setpoint ${setpoint ?? '2–8°C'}` : 'Ambient transport'}
+                <br />
+                {selected.dispatchedAt ? `Departed ${new Date(selected.dispatchedAt).toLocaleString('en-GB')}` : 'Not yet dispatched'}
+                <br />
+                {selected.etaAt ? `ETA ${new Date(selected.etaAt).toLocaleString('en-GB')}` : 'ETA pending'}
+              </div>
+            </div>
+
+            <button
+              style={{ border: `1px solid ${C.border}`, background: C.surface, font: `500 12px/1 ${FONT}`, color: C.ink, padding: 10, borderRadius: 4, cursor: 'pointer', width: '100%', marginTop: 12 }}
+            >
+              Print QR manifest
+            </button>
+          </div>
+        )}
+      </aside>
+    </div>
   );
 }

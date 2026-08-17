@@ -7,10 +7,10 @@
 
 import { useEffect, useState } from 'react';
 
-import { askAssistant } from '../../lib/api';
-import { C, FONT, MONO, bandColors } from '../../lib/theme';
-import { ApiError, Card, Empty, Kpi, KpiBand, PageHeader } from '../../components/ui';
-import { MiniSparkline as Sparkline } from '../../components/charts';
+import { askAssistant, getFulfilment, type FulfilmentRow } from '../../lib/api';
+import { C, FONT, MONO, bandColors, rise } from '../../lib/theme';
+import { ApiError, Card, CardTitle, Empty } from '../../components/ui';
+import { BarChart, ForecastChart, Meter, SignalBars } from '../../components/charts';
 
 interface RiskSignal {
   name: string;
@@ -58,8 +58,27 @@ interface ForecastRow {
   } | null;
 }
 
-function labelize(name: string): string {
-  return name.replace(/_/g, ' ');
+/** Plain-language labels for the SHAP feature names the forecast returns. */
+function humanizeDriver(label: string): string {
+  const key = label.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+  const map: Record<string, string> = {
+    'lag 1': "Last month's consumption",
+    'lag1': "Last month's consumption",
+    'lag 12': 'Same month last year',
+    'lag12': 'Same month last year',
+    'trend': 'Underlying demand trend',
+    'seasonality': 'Seasonal pattern',
+    'seasonal': 'Seasonal pattern',
+    'month': 'Time of year',
+    'rolling mean': 'Recent average consumption',
+    'rolling std': 'Recent demand volatility',
+    'stockout days': 'Recent stockout days',
+    'onboarded': 'Institutions newly onboarded',
+  };
+  for (const [k, v] of Object.entries(map)) {
+    if (key.includes(k)) return v;
+  }
+  return label.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export default function RiskPage() {
@@ -67,7 +86,9 @@ export default function RiskPage() {
   const [riskError, setRiskError] = useState<string | null>(null);
   const [forecastData, setForecastData] = useState<ForecastRow[] | null>(null);
   const [forecastError, setForecastError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [selected, setSelected] = useState(0);
+  const [coverage, setCoverage] = useState<FulfilmentRow[] | null>(null);
+  const [coverageError, setCoverageError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -86,294 +107,224 @@ export default function RiskPage() {
         setForecastError((e as Error).message);
       }
     })();
+    (async () => {
+      try {
+        const res = await getFulfilment();
+        setCoverage(res.items);
+      } catch (e) {
+        setCoverageError((e as Error).message);
+      }
+    })();
   }, []);
 
-  const rows = (riskData ?? []).slice(0, 8);
-  const critical = (riskData ?? []).filter((r) => r.band === 'CRITICAL').length;
-  const high = (riskData ?? []).filter((r) => r.band === 'HIGH').length;
-  const highConfidence = (riskData ?? []).filter((r) => r.confidence === 'high').length;
+  const top = (riskData ?? [])[selected] ?? null;
+  const forecast = (forecastData ?? [])[selected] ?? (forecastData ?? [])[0] ?? null;
 
-  const forecastRows = (forecastData ?? []).slice(0, 6);
+  const bc = top ? bandColors(top.band) : { color: C.grey, tint: C.greyTint };
+  const signals =
+    top?.signals.map((s) => {
+      const pct = s.weight !== 0 ? Math.max(0, Math.min(100, (s.contribution / s.weight) * 100)) : 0;
+      const sc = pct >= 66 ? C.red : pct >= 40 ? C.amber : C.green;
+      return { label: humanizeDriver(s.name), value: s.value.toFixed(2), pct, color: sc, note: s.explanation };
+    }) ?? [];
+
+  const monthLabel = new Date().toLocaleDateString('en-GB', { month: 'long' });
+
+  const history = forecast?.history.map((h) => ({ x: h.period, y: h.dispensed })) ?? [];
+  const forecastPoints = forecast ? [{ x: 'Next', y: forecast.point }] : [];
+  const band = forecast ? [{ hi: forecast.p90, lo: forecast.p10 }] : [];
+  const drivers =
+    forecast?.drivers.map((d) => ({
+      label: humanizeDriver(d.label),
+      value: d.magnitude,
+      color: d.direction === 'RISING' ? C.red : d.direction === 'FALLING' ? C.green : C.accent,
+    })) ?? [];
 
   return (
     <>
-      <PageHeader title="Risk + Demand Forecast" />
-
-      {riskData && !riskError && (
-        <KpiBand columns={4}>
-          <Kpi label="Flagged" value={riskData.length} />
-          <Kpi label="Critical" value={critical} deltaColor={critical ? C.red : C.grey} />
-          <Kpi label="High" value={high} deltaColor={high ? C.amber : C.grey} />
-          <Kpi label="High confidence" value={highConfidence} deltaColor={C.accent} />
-        </KpiBand>
-      )}
-
-      <div style={{ padding: 26, display: 'grid', gap: 28 }}>
-        <section style={{ display: 'grid', gap: 14, animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-          <div style={{ font: `600 13px/1.3 ${FONT}`, color: C.ink }}>Stockout Risk</div>
-
-          {riskError ? (
-            <ApiError error={riskError} />
-          ) : riskData === null ? (
-            <Empty>Loading…</Empty>
-          ) : (
-            <>
-              {rows.length === 0 ? (
-                <Empty>No stockout risk detected.</Empty>
-              ) : (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {rows.map((r, i) => {
-                    const bc = bandColors(r.band);
-                    const isOpen = expanded === i;
-                    return (
-                      <Card key={i} style={{ padding: 0 }}>
-                        <button
-                          onClick={() => setExpanded(isOpen ? null : i)}
-                          style={{
-                            display: 'flex',
-                            width: '100%',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 12,
-                            padding: '12px 16px',
-                            border: 'none',
-                            background: 'transparent',
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                          }}
-                        >
-                          <div>
-                            <div style={{ font: `600 13px/1.3 ${FONT}`, color: C.ink }}>{r.institution}</div>
-                            <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkSoft, marginTop: 2 }}>
-                              {r.district} · {r.drug}
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            <span style={{ font: `500 20px/1 ${MONO}`, color: C.ink }}>{r.score.toFixed(2)}</span>
-                            <span
-                              style={{
-                                padding: '2px 7px',
-                                borderRadius: 4,
-                                background: bc.tint,
-                                color: bc.color,
-                                font: `600 10px/1.5 ${MONO}`,
-                                letterSpacing: '.04em',
-                              }}
-                            >
-                              {r.band}
-                            </span>
-                            <span
-                              style={{
-                                padding: '2px 7px',
-                                borderRadius: 4,
-                                background: C.greyTint,
-                                color: C.inkSoft,
-                                font: `500 10px/1.5 ${FONT}`,
-                              }}
-                            >
-                              {r.confidence} confidence
-                            </span>
-                          </div>
-                        </button>
-
-                        {isOpen && (
-                          <div style={{ padding: '4px 16px 16px', borderTop: `1px solid ${C.borderSoft}` }}>
-                            <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
-                              {r.signals.map((s, j) => {
-                                const pct = s.weight !== 0 ? Math.max(0, Math.min(1, s.contribution / s.weight)) : 0;
-                                return (
-                                  <div key={j}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                                      <span style={{ font: `500 11px/1.4 ${FONT}`, color: C.inkMuted, textTransform: 'capitalize' }}>
-                                        {labelize(s.name)}
-                                      </span>
-                                      <span style={{ font: `500 11px/1.4 ${MONO}`, color: C.ink }}>{s.value}</span>
-                                    </div>
-                                    <div style={{ background: C.borderSoft, height: 5, marginTop: 4 }}>
-                                      <div style={{ width: `${pct * 100}%`, height: '100%', background: C.accent }} />
-                                    </div>
-                                    <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkGhost, marginTop: 3 }}>
-                                      {s.explanation}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost, marginTop: 12 }}>
-                              Confidence is signal agreement: high when at least 3 of 5 signals point the same way,
-                              medium at 2, low at 1.
-                            </div>
-                            <span
-                              style={{
-                                display: 'inline-block',
-                                marginTop: 8,
-                                padding: '2px 7px',
-                                borderRadius: 4,
-                                background: C.greyTint,
-                                color: C.inkSoft,
-                                font: `500 10px/1.5 ${MONO}`,
-                              }}
-                            >
-                              source: {r.source}
-                            </span>
-                          </div>
-                        )}
-                      </Card>
-                    );
-                  })}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.15fr)', gap: 24, padding: '26px 26px 0' }}>
+        <Card style={{ borderLeft: `2px solid ${C.red}`, animation: rise(0) }}>
+          <CardTitle>Nidana · risk drilldown</CardTitle>
+          <div style={{ padding: 20 }}>
+            {riskError ? (
+              <ApiError error={riskError} />
+            ) : riskData === null ? (
+              <Empty>Loading…</Empty>
+            ) : !top ? (
+              <Empty>No stockout risk detected.</Empty>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16 }}>
+                  <div>
+                    <div style={{ font: `600 16px/1.35 ${FONT}`, color: C.ink }}>
+                      {top.drug} · {top.district}
+                    </div>
+                    <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 5, maxWidth: 320 }}>
+                      Confidence is signal agreement, not model certainty: {top.confidence} confidence means{' '}
+                      {top.confidence === 'high' ? 'at least 3 of 5' : top.confidence === 'medium' ? '2 of 5' : '1 of 5'}{' '}
+                      signals point the same way.
+                    </div>
+                  </div>
+                  <div style={{ font: `600 52px/1 ${MONO}`, letterSpacing: '-.05em', color: bc.color }}>
+                    {Math.round(top.score)}
+                  </div>
                 </div>
-              )}
-            </>
-          )}
-        </section>
 
-        <section style={{ display: 'grid', gap: 14 }}>
-          <div>
-            <div style={{ font: `600 13px/1.3 ${FONT}`, color: C.ink }}>Demand Forecast</div>
-            <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 4 }}>
-              Next-period demand with an 80% confidence band. Drivers are SHAP attributions, translated.
-            </div>
+                {(riskData ?? []).length > 1 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 14 }}>
+                    {(riskData ?? []).slice(0, 8).map((r, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setSelected(i)}
+                        style={{
+                          padding: '4px 8px',
+                          border: `1px solid ${i === selected ? C.ink : C.border}`,
+                          borderRadius: 3,
+                          background: i === selected ? C.ink : C.surface,
+                          color: i === selected ? C.bg : C.inkMuted,
+                          font: `500 10px/1.4 ${MONO}`,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {r.institution.slice(0, 14)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ marginTop: 16 }}>
+                  <SignalBars signals={signals} />
+                </div>
+              </>
+            )}
           </div>
+        </Card>
 
-          {forecastError ? (
-            <ApiError error={forecastError} />
-          ) : forecastData === null ? (
-            <Empty>Loading…</Empty>
-          ) : forecastRows.length === 0 ? (
-            <Empty>No forecast data available.</Empty>
-          ) : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              {forecastRows.map((f, i) => (
-                <Card key={i} style={{ padding: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ font: `600 13px/1.3 ${FONT}`, color: C.ink }}>{f.drug}</div>
-                      <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkSoft, marginTop: 2 }}>{f.institution}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
-                        <span style={{ font: `500 20px/1 ${MONO}`, color: C.ink }}>{f.point}</span>
-                        {f.changePct == null ? (
-                          <span style={{ font: `500 10px/1.5 ${MONO}`, color: C.inkGhost }}>—</span>
-                        ) : (
-                          <span
-                            style={{
-                              padding: '2px 7px',
-                              borderRadius: 4,
-                              background: f.changePct > 0 ? C.amberTint : C.greenTint,
-                              color: f.changePct > 0 ? C.amber : C.green,
-                              font: `600 10px/1.5 ${MONO}`,
-                            }}
-                          >
-                            {f.changePct > 0 ? '+' : ''}
-                            {f.changePct.toFixed(1)}%
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ font: `500 11px/1.4 ${MONO}`, color: C.inkSoft, marginTop: 3 }}>
-                        {f.p10} – {f.p90}
-                      </div>
-                    </div>
+        <Card style={{ animation: rise(60) }}>
+          <CardTitle
+            right={
+              forecast?.metrics && (
+                <span style={{ font: `500 11px/1 ${MONO}`, color: C.inkMuted }}>MAPE {forecast.metrics.mape}%</span>
+              )
+            }
+          >
+            Demand forecast{forecast ? ` · ${forecast.drug}` : ''}
+          </CardTitle>
+          <div style={{ padding: 20 }}>
+            {forecastError ? (
+              <ApiError error={forecastError} />
+            ) : forecastData === null ? (
+              <Empty>Loading…</Empty>
+            ) : !forecast ? (
+              <Empty>No forecast data available.</Empty>
+            ) : (
+              <>
+                <ForecastChart history={history} forecast={forecastPoints} band={band} yFormat={(v) => Math.round(v).toLocaleString('en-IN')} />
+                <div style={{ borderTop: `1px solid ${C.borderSoft}`, marginTop: 12, paddingTop: 12 }}>
+                  <div
+                    style={{
+                      font: `600 11px/1 ${FONT}`,
+                      letterSpacing: '.17em',
+                      textTransform: 'uppercase',
+                      color: C.inkFaint,
+                      marginBottom: 10,
+                    }}
+                  >
+                    Why the model says this
                   </div>
-
-                  <div style={{ marginTop: 12 }}>
-                    <ForecastTrend history={f.history} point={f.point} p10={f.p10} p90={f.p90} />
-                  </div>
-
-                  {f.drivers.length > 0 && (
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-                      {f.drivers.map((d, j) => (
-                        <span
-                          key={j}
-                          style={{
-                            padding: '2px 8px',
-                            background: C.greyTint,
-                            color: C.inkMuted,
-                            font: `500 10px/1.6 ${FONT}`,
-                            borderRadius: 4,
-                          }}
-                        >
-                          {d.direction === 'RISING' ? '↑' : d.direction === 'FALLING' ? '↓' : '•'} {d.label}
-                        </span>
-                      ))}
-                    </div>
+                  {drivers.length === 0 ? (
+                    <Empty>No driver attribution available.</Empty>
+                  ) : (
+                    <BarChart data={drivers} valueFormat={(v) => `${v > 0 ? '+' : ''}${v}%`} />
                   )}
+                </div>
+              </>
+            )}
+          </div>
+        </Card>
+      </div>
 
-                  <div style={{ font: `400 10px/1.5 ${MONO}`, color: C.inkGhost, marginTop: 10 }}>
-                    {f.metrics ? (
-                      <>
-                        MAPE {f.metrics.mape}% · coverage {f.metrics.band_coverage_pct}% of{' '}
-                        {f.metrics.band_coverage_target_pct}% · {f.metrics.train_rows} train / {f.metrics.holdout_rows}{' '}
-                        holdout · lightgbm
-                      </>
-                    ) : (
-                      <>rolling-mean fallback · insufficient history to train</>
-                    )}
-                  </div>
-                </Card>
-              ))}
-              <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost }}>
-                Coverage is reported as measured, not tuned. On a short, strongly-trended series it varies — the row
-                counts show why.
-              </div>
+      <div style={{ padding: '26px 26px 52px' }}>
+        <Card style={{ overflowX: 'auto', animation: rise(100) }}>
+          <CardTitle>Coverage gaps · {monthLabel}</CardTitle>
+          {coverageError ? (
+            <div style={{ padding: 16 }}>
+              <ApiError error={coverageError} />
             </div>
+          ) : coverage === null ? (
+            <Empty>Loading…</Empty>
+          ) : coverage.length === 0 ? (
+            <Empty>No fulfilment data available.</Empty>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
+              <thead>
+                <tr>
+                  {['District', 'Forecast', 'Committed', 'Coverage'].map((h, i) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: i === 0 ? 'left' : i === 3 ? 'left' : 'right',
+                        font: `600 11px/1 ${FONT}`,
+                        letterSpacing: '.13em',
+                        textTransform: 'uppercase',
+                        color: C.inkSoft,
+                        padding: '14px 18px',
+                        borderBottom: `1px solid ${C.border}`,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {coverage.map((row, i) => {
+                  const pct = row.fulfilmentPct ?? 0;
+                  const gapUnits = row.dispensed - row.trueDemand;
+                  const gc = pct >= 90 ? C.green : pct >= 70 ? C.amber : C.red;
+                  return (
+                    <tr key={i}>
+                      <td style={{ ...cellText, fontWeight: 500 }}>{row.district}</td>
+                      <td style={cellNum}>{Math.round(row.trueDemand).toLocaleString('en-IN')}</td>
+                      <td style={{ ...cellNum, color: C.inkMuted, fontWeight: 400 }}>
+                        {Math.round(row.dispensed).toLocaleString('en-IN')}
+                      </td>
+                      <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                          <Meter pct={pct} color={gc} width={140} thickness={6} />
+                          <span style={{ font: `500 12px/1 ${MONO}`, color: gc }}>
+                            {gapUnits >= 0 ? '+' : ''}
+                            {Math.round(gapUnits).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
-        </section>
+        </Card>
       </div>
     </>
   );
 }
 
-function ForecastTrend({
-  history,
-  point,
-  p10,
-  p90,
-}: {
-  history: Array<{ period: string; dispensed: number }>;
-  point: number;
-  p10: number;
-  p90: number;
-}) {
-  const values = history.map((h) => h.dispensed);
-  if (values.length === 0) {
-    return <Sparkline values={[point]} width={200} height={40} />;
-  }
+const cellText = {
+  padding: '15px 18px',
+  font: `400 14px/1.6 ${FONT}`,
+  color: C.ink,
+  borderBottom: `1px solid ${C.borderSoft}`,
+  verticalAlign: 'top' as const,
+};
 
-  const W = 280;
-  const H = 48;
-  const histW = 190;
-  const bandW = W - histW - 10;
-  const padY = 6;
-
-  const allValues = [...values, p10, p90, point];
-  const min = Math.min(...allValues);
-  const max = Math.max(...allValues);
-  const span = max - min || 1;
-  const scaleY = (v: number) => padY + (H - padY * 2) - ((v - min) / span) * (H - padY * 2);
-
-  const n = values.length;
-  const xAt = (i: number) => (n === 1 ? histW / 2 : (i / (n - 1)) * histW);
-  const linePoints = values.map((v, i) => `${xAt(i)},${scaleY(v)}`).join(' ');
-  const bandX = histW + 10;
-
-  return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      <line x1={histW + 5} x2={histW + 5} y1={0} y2={H} stroke={C.borderSoft} strokeWidth={1} />
-      {n === 1 ? (
-        <circle cx={xAt(0)} cy={scaleY(values[0])} r={2} fill={C.accent} />
-      ) : (
-        <polyline points={linePoints} fill="none" stroke={C.accent} strokeWidth={1.5} />
-      )}
-      <rect
-        x={bandX}
-        y={scaleY(p90)}
-        width={bandW}
-        height={Math.max(scaleY(p10) - scaleY(p90), 1)}
-        fill={C.accent}
-        opacity={0.15}
-      />
-      <line x1={bandX} x2={bandX + bandW} y1={scaleY(point)} y2={scaleY(point)} stroke={C.ink} strokeWidth={1.5} />
-    </svg>
-  );
-}
+const cellNum = {
+  padding: '15px 18px',
+  font: `500 14px/1.4 ${MONO}`,
+  color: C.ink,
+  textAlign: 'right' as const,
+  fontVariantNumeric: 'tabular-nums' as const,
+  borderBottom: `1px solid ${C.borderSoft}`,
+  verticalAlign: 'top' as const,
+};
