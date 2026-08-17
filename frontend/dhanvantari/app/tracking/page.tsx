@@ -195,7 +195,6 @@ function Inner() {
     const hasExcursion = !!excursion || detail.anomalyFlag;
     const delivered = detail.status === 'DELIVERED';
     const outForDelivery = detail.status === 'OUT_FOR_DELIVERY' || delivered;
-    const inTransit = ['IN_TRANSIT', 'DISPATCHED', 'OUT_FOR_DELIVERY'].includes(detail.status) || delivered;
 
     const rows: Array<{ label: string; time: string; dot: string; line?: string; fg?: string; done: boolean }> = [
       { label: 'Order approved', time: detail.supplyOrderId ? detail.supplyOrderId.slice(0, 12) : '—', dot: C.green, done: true },

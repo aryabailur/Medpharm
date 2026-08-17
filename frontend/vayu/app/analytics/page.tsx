@@ -241,7 +241,7 @@ export default function AnalyticsPage() {
           <CardTitle>Supplier Reliability vs Price</CardTitle>
           <div style={{ padding: 16 }}>
             {vendors.length === 0 ? (
-              <Empty>No vendor data.</Empty>
+              <Empty>No supplier data.</Empty>
             ) : (
               <>
                 <ScatterPlot points={vendorPoints} xLabel="Price variance vs catalogue (%)" yLabel="On-time %" />
@@ -255,7 +255,7 @@ export default function AnalyticsPage() {
             )}
           </div>
           {vendors.length > 0 && (
-            <Table head={['Vendor', 'On-time %', 'Avg delay', 'Price vs catalogue', 'Rejection %', 'POs']}>
+            <Table head={['Supplier', 'On-time %', 'Avg delay', 'Price vs catalogue', 'Rejection %', 'POs']}>
               {vendors.map((v) => (
                 <tr key={v.vendorId}>
                   <Td>{v.name}</Td>

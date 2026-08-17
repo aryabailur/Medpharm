@@ -210,11 +210,16 @@ function Inner() {
   const seriesStart = tempPoints.length ? new Date(tempPoints[0].ts).getTime() : 0;
   const seriesEnd = tempPoints.length ? new Date(tempPoints[tempPoints.length - 1].ts).getTime() : 0;
   const seriesSpan = seriesEnd - seriesStart || 1;
-  const bands = excursions.map((e) => {
-    const from = (new Date(e.startedAt).getTime() - seriesStart) / seriesSpan;
-    const to = (e.endedAt ? new Date(e.endedAt).getTime() : seriesEnd - seriesStart + seriesStart) - seriesStart;
-    return { from: Math.max(0, Math.min(1, from)), to: Math.max(0, Math.min(1, to / seriesSpan)), label: `${e.severity} · ${fmtDuration(e.durationMin)}` };
-  });
+  /** Absolute ms → 0..1 position along the plotted telemetry window. */
+  const asFraction = (ms: number) =>
+    Math.max(0, Math.min(1, (ms - seriesStart) / seriesSpan));
+
+  const bands = excursions.map((e) => ({
+    from: asFraction(new Date(e.startedAt).getTime()),
+    // An open excursion runs to the last reading we have.
+    to: asFraction(e.endedAt ? new Date(e.endedAt).getTime() : seriesEnd),
+    label: `${e.severity} · ${fmtDuration(e.durationMin)}`,
+  }));
   const tickCount = 5;
   const ticks = tempPoints.length
     ? Array.from({ length: tickCount }, (_, i) => {
