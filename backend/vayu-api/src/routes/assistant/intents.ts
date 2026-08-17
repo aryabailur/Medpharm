@@ -16,7 +16,7 @@
  */
 
 import { prisma } from '../../lib/prisma.js';
-import { risk } from '../../lib/nidana-client.js';
+import { forecast, risk } from '../../lib/nidana-client.js';
 
 export type Intent =
   | 'diagnosis.stockout'
@@ -327,6 +327,73 @@ async function diagnosisStockout(entities: Entities): Promise<Evidence> {
   };
 }
 
+
+/** M2 — per-drug demand forecast with an 80% band and plain-language drivers. */
+async function demandForecast(entities: Entities): Promise<Evidence> {
+  const feeds = await prisma.consumptionFeed.findMany({
+    orderBy: { periodMonth: 'asc' },
+    include: {
+      institution: { select: { id: true, name: true, district: true } },
+      drug: { select: { id: true, name: true } },
+    },
+  });
+
+  // Group into one series per institution+drug. The model needs an ordered
+  // monthly series; a bag of rows would forecast nothing meaningful.
+  const byPair = new Map<
+    string,
+    { institution: string; district: string | null; drug: string; institutionId: string; drugId: string; history: Array<{ period: string; dispensed: number }> }
+  >();
+  for (const f of feeds) {
+    if (entities.district && f.institution.district?.toLowerCase() !== entities.district.toLowerCase()) continue;
+    const key = `${f.institutionId}:${f.drugId}`;
+    const cur = byPair.get(key) ?? {
+      institution: f.institution.name,
+      district: f.institution.district,
+      drug: f.drug.name,
+      institutionId: f.institutionId,
+      drugId: f.drugId,
+      history: [],
+    };
+    cur.history.push({ period: f.periodMonth, dispensed: f.dispensed ?? 0 });
+    byPair.set(key, cur);
+  }
+
+  const results = await Promise.all(
+    [...byPair.values()].map(async (p) => {
+      const f = await forecast({
+        institutionId: p.institutionId,
+        drugId: p.drugId,
+        history: p.history,
+      });
+      const lastActual = p.history[p.history.length - 1]?.dispensed ?? 0;
+      return {
+        institution: p.institution,
+        district: p.district,
+        drug: p.drug,
+        history: p.history.slice(-12),
+        point: f.point,
+        p10: f.p10,
+        p90: f.p90,
+        drivers: f.drivers,
+        lastActual,
+        changePct: lastActual > 0 ? Number((((f.point - lastActual) / lastActual) * 100).toFixed(1)) : null,
+        source: f.source,
+        metrics: (f as { metrics?: unknown }).metrics ?? null,
+      };
+    }),
+  );
+
+  const sorted = results.sort((a, b) => b.point - a.point);
+  return {
+    intent: 'demand.forecast',
+    summary: sorted.length
+      ? `Next-period demand forecast for ${sorted.length} institution/drug pair(s)`
+      : 'No consumption history to forecast from',
+    data: sorted,
+  };
+}
+
 /** Dispatch table — one hand-written Prisma path per intent (§7.4). */
 export async function dispatch(intent: Intent, entities: Entities): Promise<Evidence> {
   switch (intent) {
@@ -347,6 +414,7 @@ export async function dispatch(intent: Intent, entities: Entities): Promise<Evid
     case 'diagnosis.stockout':
       return diagnosisStockout(entities);
     case 'demand.forecast':
+      return demandForecast(entities);
     case 'route.performance':
     case 'coverage.gap':
     case 'wastage.flag':
