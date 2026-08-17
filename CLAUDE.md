@@ -152,3 +152,6 @@ These are in ARCHITECTURE.md but are repeated here because they are easy to skip
 - Don't add a dependency without checking whether the stack already covers it.
 - Don't build Phase 10–11 items (mobile, hardware, offline PWA, route optimizer) until Phases 0–9 are green. They are the cut list.
 - When a subagent reports "done," verify against the phase gate — don't take it at face value.
+- **Code modularity & AI readability:** Keep functions small, explicitly type input/outputs, keep logic decoupled, and avoid bloated monolithic components. This makes it easier for other agents to read, understand, and safely modify files.
+- **Continuous Instruction Updates:** Whenever there is a major architectural change, new tool/library integration, or after every 5-6 significant task steps, update this file (`CLAUDE.md`) and the project track files to keep rules, best practices, and limitations fresh for future agents.
+
