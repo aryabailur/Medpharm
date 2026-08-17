@@ -43,6 +43,7 @@ const GROUPS: Array<{ label: string; items: Array<[string, string]> }> = [
       ['/risk', 'Risk + Forecast'],
       ['/reliability', 'Institution Reliability'],
       ['/assistant', 'Assistant'],
+      ['/analytics', 'Network Analytics'],
     ],
   },
 ];
