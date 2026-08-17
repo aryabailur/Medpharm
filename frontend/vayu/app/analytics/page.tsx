@@ -29,8 +29,6 @@ import { C, FONT, rupees } from '../../lib/theme';
 import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Table, Td } from '../../components/ui';
 import { BarChart, Histogram, LineChart, MultiLineChart, ScatterPlot } from '../../components/charts';
 
-const DEFAULT_DRUG_ID = 'DRG002';
-
 export default function AnalyticsPage() {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [catalog, setCatalog] = useState<Drug[]>([]);
@@ -47,7 +45,7 @@ export default function AnalyticsPage() {
     null,
   );
 
-  const [drugId, setDrugId] = useState(DEFAULT_DRUG_ID);
+  const [drugId, setDrugId] = useState('');
   const [consumption, setConsumption] = useState<ConsumptionResponse | null>(null);
   const [consumptionError, setConsumptionError] = useState<string | null>(null);
 
@@ -68,6 +66,7 @@ export default function AnalyticsPage() {
         ]);
         setSummary(s);
         setCatalog(c.items);
+        setDrugId((current) => current || c.items[0]?.id || '');
         setVendors(v.items);
         setFulfilment(f.items);
         setStockHealth(sh);
@@ -83,6 +82,7 @@ export default function AnalyticsPage() {
   }, []);
 
   useEffect(() => {
+    if (!drugId) return;
     (async () => {
       try {
         const res = await getConsumption(drugId);
