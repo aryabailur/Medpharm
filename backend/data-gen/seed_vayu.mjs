@@ -259,11 +259,13 @@ async function main() {
   }
 
   // ─── Consumption history (§10: trend + seasonality + noise) ───────────────
-  // Twelve months so the forecast has real seasonality to catch and the risk
-  // score has a genuine trend to react to. Deliberately not clean: §10 warns
+  // Thirty months, not twelve. LightGBM needs ~18 usable rows after lag
+  // construction (the longest lag is 12), so a 12-month series can only ever
+  // fall back to a rolling mean. Thirty months lets the trained path actually
+  // engage and gives the seasonal term two full cycles to learn from. Deliberately not clean: §10 warns
   // that a too-tidy generator makes every downstream feature look fake.
-  const months = Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(now - (11 - i) * 30 * DAY);
+  const months = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(now - (29 - i) * 30 * DAY);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
 
@@ -291,7 +293,7 @@ async function main() {
           opening: Math.round(dispensed * 1.2), received: Math.round(dispensed * 1.05),
           dispensed,
           closing: i === months.length - 1 ? closing : Math.round(dispensed * 0.9),
-          receivedAt: new Date(now - (11 - i) * 30 * DAY),
+          receivedAt: new Date(now - (months.length - 1 - i) * 30 * DAY),
         },
       });
     }

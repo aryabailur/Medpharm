@@ -39,11 +39,75 @@ function humanise(name: string): string {
   return name.replace(/_/g, ' ');
 }
 
+interface ForecastHistoryPoint {
+  period: string;
+  dispensed: number;
+}
+
+interface ForecastDriver {
+  label: string;
+  direction: 'up' | 'down';
+  magnitude: number;
+}
+
+interface ForecastMetrics {
+  mape: number | null;
+  band_coverage_pct: number | null;
+  band_coverage_target_pct: number | null;
+  train_rows: number | null;
+  holdout_rows: number | null;
+}
+
+interface ForecastRow {
+  institution: string;
+  district: string | null;
+  drug: string;
+  history: ForecastHistoryPoint[];
+  point: number;
+  p10: number;
+  p90: number;
+  drivers: ForecastDriver[];
+  lastActual: number;
+  changePct: number | null;
+  source: 'nidana' | 'fallback' | string;
+  metrics: ForecastMetrics | null;
+}
+
+/** Sparkline + forecast band, plain SVG. Guards against a flat series. */
+function ForecastSparkline({ row }: { row: ForecastRow }) {
+  const values = row.history.map((h) => h.dispensed);
+  const allValues = [...values, row.p10, row.p90];
+  const min = Math.min(...allValues);
+  const max = Math.max(...allValues);
+  const range = max - min;
+
+  const historyX = (i: number) => (values.length > 1 ? (i / (values.length - 1)) * 290 : 0);
+  const y = (v: number) => (range === 0 ? 32 : 64 - ((v - min) / range) * 64);
+
+  const points = values.map((v, i) => `${historyX(i)},${y(v)}`).join(' ');
+  const p10Y = y(row.p10);
+  const p90Y = y(row.p90);
+  const pointY = y(row.point);
+
+  return (
+    <svg width="100%" height={64} viewBox="0 0 300 64" preserveAspectRatio="none">
+      <line x1={290} y1={0} x2={290} y2={64} stroke={C.border} strokeWidth={1} />
+      <rect x={290} y={Math.min(p10Y, p90Y)} width={10} height={Math.max(1, Math.abs(p90Y - p10Y))} fill={C.blueTint} />
+      {values.length > 0 && <polyline points={points} fill="none" stroke={C.steel} strokeWidth={1.5} />}
+      <circle cx={295} cy={pointY} r={3} fill={C.blue} />
+    </svg>
+  );
+}
+
 export default function RiskPage() {
   const [rows, setRows] = useState<RiskRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
+
+  const [forecastRows, setForecastRows] = useState<ForecastRow[] | null>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
+  const [forecastLoading, setForecastLoading] = useState(true);
 
   useEffect(() => {
     void (async () => {
@@ -55,6 +119,20 @@ export default function RiskPage() {
         setError((e as Error).message);
       } finally {
         setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await askAssistant('what will we need next month');
+        const data = res.evidence?.data;
+        setForecastRows(Array.isArray(data) ? (data as ForecastRow[]) : []);
+      } catch (e) {
+        setForecastError((e as Error).message);
+      } finally {
+        setForecastLoading(false);
       }
     })();
   }, []);
@@ -185,6 +263,102 @@ export default function RiskPage() {
             </div>
           </>
         )}
+
+        <div>
+          <div style={{ font: `600 15px/1.3 ${FONT}`, color: C.ink, marginTop: 28, marginBottom: 12 }}>
+            Demand Forecast
+          </div>
+          <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkFaint, marginTop: -8, marginBottom: 12 }}>
+            Next-period demand with an 80% confidence band. Drivers are SHAP attributions, translated.
+          </div>
+
+          {forecastError ? (
+            <ApiError error={forecastError} />
+          ) : forecastLoading ? (
+            <Card style={{ padding: 18 }}>
+              <div style={{ font: `400 13px/1.5 ${FONT}`, color: C.inkFaint }}>Loading demand forecast…</div>
+            </Card>
+          ) : !forecastRows || forecastRows.length === 0 ? (
+            <Card>
+              <Empty>No forecast data is available.</Empty>
+            </Card>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gap: 12 }}>
+                {forecastRows.slice(0, 6).map((row, i) => {
+                  const rising = row.changePct !== null && row.changePct > 0;
+                  const chipColor = row.changePct === null ? C.inkFaint : rising ? C.amber : C.green;
+                  const chipTint = row.changePct === null ? C.greyTint : rising ? C.amberTint : C.greenTint;
+                  return (
+                    <Card key={`${row.institution}-${row.drug}-${i}`} style={{ padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ font: `600 14px/1.4 ${FONT}`, color: C.ink }}>{row.drug}</div>
+                          <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkFaint, marginTop: 2 }}>
+                            {row.institution} · {row.district ?? 'Unknown district'}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          <div style={{ font: `600 22px/1 ${FONT}`, color: C.ink }}>{row.point}</div>
+                          <div style={{ font: `400 11px/1.4 ${MONO}`, color: C.inkFaint, marginTop: 4 }}>
+                            {row.p10} – {row.p90}
+                          </div>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              marginTop: 6,
+                              padding: '2px 7px',
+                              borderRadius: 6,
+                              background: chipTint,
+                              color: chipColor,
+                              font: `600 10px/1.4 ${MONO}`,
+                            }}
+                          >
+                            {row.changePct === null ? '—' : `${row.changePct > 0 ? '+' : ''}${row.changePct.toFixed(1)}%`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 12 }}>
+                        <ForecastSparkline row={row} />
+                      </div>
+
+                      {row.drivers.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                          {row.drivers.map((d, di) => (
+                            <span
+                              key={`${d.label}-${di}`}
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: 6,
+                                background: C.greyTint,
+                                color: C.inkMuted,
+                                font: `400 11px/1.4 ${FONT}`,
+                              }}
+                            >
+                              {d.direction === 'up' ? '↑' : '↓'} {d.label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ font: `400 11px/1.5 ${MONO}`, color: C.inkGhost, marginTop: 10 }}>
+                        {row.metrics && row.metrics.train_rows !== null
+                          ? `MAPE ${row.metrics.mape}% · band coverage ${row.metrics.band_coverage_pct}% of ${row.metrics.band_coverage_target_pct}% target · ${row.metrics.train_rows} train / ${row.metrics.holdout_rows} holdout · lightgbm`
+                          : 'rolling-mean fallback · insufficient history to train'}
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkFaint, marginTop: 12 }}>
+                Coverage is reported as measured, not tuned. On a short, strongly-trended series it varies —
+                the row counts show why.
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </>
   );

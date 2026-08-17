@@ -22,12 +22,24 @@ export interface ForecastInput {
   horizonMonths?: number;
 }
 
+export interface ForecastMetrics {
+  mape: number | null;
+  band_coverage_pct: number | null;
+  band_coverage_target_pct?: number | null;
+  train_rows?: number | null;
+  holdout_rows?: number | null;
+}
+
 export interface ForecastResult {
   point: number;
   p10: number;
   p90: number;
   drivers: Array<{ label: string; direction: 'up' | 'down'; magnitude: number }>;
   source: 'nidana' | 'fallback';
+  /** Present only on the trained path; the rolling-mean fallback has none. */
+  metrics?: ForecastMetrics | null;
+  /** "lightgbm" or "rolling_mean" — names the path that served this. */
+  model_version?: string;
 }
 
 export interface RiskInput {
