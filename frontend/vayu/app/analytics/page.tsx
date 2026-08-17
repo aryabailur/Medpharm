@@ -25,9 +25,30 @@ import {
   type CriticalStockRow,
   type VendorMetric,
 } from '../../lib/api';
-import { C, FONT, rupees } from '../../lib/theme';
+import { C, FONT, LABEL, rupees } from '../../lib/theme';
 import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Table, Td } from '../../components/ui';
 import { BarChart, Histogram, LineChart, MultiLineChart, ScatterPlot } from '../../components/charts';
+
+/**
+ * Section divider — the page reads as three questions in causal order:
+ * what's driving demand, is supply keeping up, and where is the network
+ * failing as a result. Each divider spans the full grid row.
+ */
+function Section({ children }: { children: string }) {
+  return (
+    <div
+      style={{
+        gridColumn: '1 / -1',
+        ...LABEL,
+        paddingBottom: 9,
+        marginTop: 6,
+        borderBottom: `1px solid ${C.borderFaint}`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
 export default function AnalyticsPage() {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
@@ -176,9 +197,11 @@ export default function AnalyticsPage() {
         <Kpi label="Districts" value={summary ? summary.districts : '—'} />
       </KpiBand>
 
-      <div style={{ padding: 26, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 28 }}>
-        {/* 2. Consumption & seasonality */}
-        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
+      <div style={{ padding: 26, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 20 }}>
+        <Section>Demand — what's moving, and why</Section>
+
+        {/* Consumption & seasonality */}
+        <Card style={{ gridColumn: '1 / -1', animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
           <CardTitle
             right={
               <select
@@ -236,7 +259,27 @@ export default function AnalyticsPage() {
           </div>
         </Card>
 
-        {/* 3. Supplier reliability vs price */}
+        {/* Disease signal — the leading indicator behind demand spikes */}
+        <Card style={{ gridColumn: '1 / -1' }}>
+          <CardTitle>Disease Signal</CardTitle>
+          <div style={{ padding: 16 }}>
+            {diseaseSeries.length === 0 ? (
+              <Empty>No disease signal data.</Empty>
+            ) : (
+              <>
+                <LineChart series={diseaseSeries} color={C.accent} showArea />
+                <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 10 }}>
+                  Lagged district disease cases are a top feature in the forecast model, so this regional signal
+                  genuinely carries information.
+                </div>
+              </>
+            )}
+          </div>
+        </Card>
+
+        <Section>Supply — is the network keeping up</Section>
+
+        {/* Supplier reliability vs price */}
         <Card style={{ gridColumn: '1 / -1' }}>
           <CardTitle>Supplier Reliability vs Price</CardTitle>
           <div style={{ padding: 16 }}>
@@ -285,28 +328,7 @@ export default function AnalyticsPage() {
           )}
         </Card>
 
-        {/* 4. District fulfilment */}
-        <Card>
-          <CardTitle>District Fulfilment</CardTitle>
-          <div style={{ padding: 16 }}>
-            {fulfilmentBars.length === 0 ? (
-              <Empty>No fulfilment data.</Empty>
-            ) : (
-              <>
-                <BarChart data={fulfilmentBars} horizontal valueFormat={(v) => `${v}%`} />
-                {worstDistrict && bestDistrict && (
-                  <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 10 }}>
-                    {worstDistrict.district} fulfils {(worstDistrict.fulfilmentPct ?? 0).toFixed(0)}% of demand with{' '}
-                    {worstDistrict.stockoutDays} stockout days, versus {bestDistrict.district} at{' '}
-                    {(bestDistrict.fulfilmentPct ?? 0).toFixed(0)}% with {bestDistrict.stockoutDays} stockout days.
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </Card>
-
-        {/* 5. Stock health */}
+        {/* Stock health */}
         <Card style={{ gridColumn: '1 / -1' }}>
           <CardTitle>Stock Health</CardTitle>
           <div style={{ padding: 16 }}>
@@ -332,7 +354,30 @@ export default function AnalyticsPage() {
           )}
         </Card>
 
-        {/* 6. Expiry risk */}
+        <Section>Gaps — where that shortfall lands</Section>
+
+        {/* District fulfilment — geographic gap */}
+        <Card>
+          <CardTitle>District Fulfilment</CardTitle>
+          <div style={{ padding: 16 }}>
+            {fulfilmentBars.length === 0 ? (
+              <Empty>No fulfilment data.</Empty>
+            ) : (
+              <>
+                <BarChart data={fulfilmentBars} horizontal valueFormat={(v) => `${v}%`} />
+                {worstDistrict && bestDistrict && (
+                  <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 10 }}>
+                    {worstDistrict.district} fulfils {(worstDistrict.fulfilmentPct ?? 0).toFixed(0)}% of demand with{' '}
+                    {worstDistrict.stockoutDays} stockout days, versus {bestDistrict.district} at{' '}
+                    {(bestDistrict.fulfilmentPct ?? 0).toFixed(0)}% with {bestDistrict.stockoutDays} stockout days.
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </Card>
+
+        {/* Expiry risk — the waste gap */}
         <Card>
           <CardTitle>Expiry Risk</CardTitle>
           <div style={{ padding: 16 }}>
@@ -344,24 +389,6 @@ export default function AnalyticsPage() {
                 <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 10 }}>
                   {rupees(expiryNext3mo || totalExpiryValue)} of stock value is at risk of expiry in the next 3
                   months.
-                </div>
-              </>
-            )}
-          </div>
-        </Card>
-
-        {/* 7. Disease signal */}
-        <Card>
-          <CardTitle>Disease Signal</CardTitle>
-          <div style={{ padding: 16 }}>
-            {diseaseSeries.length === 0 ? (
-              <Empty>No disease signal data.</Empty>
-            ) : (
-              <>
-                <LineChart series={diseaseSeries} color={C.accent} showArea />
-                <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 10 }}>
-                  Lagged district disease cases are a top feature in the forecast model, so this regional signal
-                  genuinely carries information.
                 </div>
               </>
             )}
