@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Dhanvantari API server \u2014 Prisma, webhooks, SSE, HMAC. Holds the shared secret.",
+  "description": "Dhanvantari API server — Prisma, webhooks, SSE, HMAC. Holds the shared secret.",
   "main": "./src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -17,7 +17,7 @@
     "@fastify/cors": "^10.0.1",
     "@medtrack/contracts": "*",
     "@medtrack/crypto": "*",
-    "@prisma/client": "^6.1.0",
+    "@prisma/client": "^6.19.3",
     "fastify": "^5.2.0",
     "zod": "^3.24.0"
   },

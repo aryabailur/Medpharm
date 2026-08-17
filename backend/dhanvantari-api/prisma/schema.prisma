@@ -126,6 +126,10 @@ model LocalComplaint {
   description  String?
   photoUrls    String[]
   filedAt      DateTime @default(now())
+  // Vayu mints its own Complaint.id when the filing lands. We store it so the
+  // complaint.status_changed webhook can find this row -- without it the RCA
+  // push-down has nothing to match on. (§5.1)
+  remoteId     String?  @unique
   remoteStatus String? // mirrors Vayu's Complaint.status via webhook
   rcaSummary   String? // manufacturer's RCA, pushed down (§6.3)
 
