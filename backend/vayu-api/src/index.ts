@@ -36,6 +36,9 @@ import { catalogRoutes } from './routes/catalog/index.js';
 import { ordersApproveRoutes } from './routes/orders/approve.js';
 import { ordersIncomingRoutes } from './routes/orders/incoming.js';
 import { ordersListRoutes } from './routes/orders/list.js';
+import { sensorRoutes } from './routes/sensors/ingest.js';
+import { streamRoutes } from './routes/stream/shipments.js';
+import { startRetryWorker } from './lib/webhooks/dispatch.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const FRONTEND_ORIGIN = process.env.VAYU_WEB_ORIGIN ?? 'http://localhost:3000';
@@ -58,6 +61,8 @@ await app.register(batchRoutes, { prefix: '/api/batches' });
 await app.register(ordersListRoutes, { prefix: '/api/orders' });
 await app.register(ordersIncomingRoutes, { prefix: '/api/orders' });
 await app.register(ordersApproveRoutes, { prefix: '/api/orders' });
+await app.register(sensorRoutes, { prefix: '/api/sensors' });
+await app.register(streamRoutes, { prefix: '/api/stream' });
 
 // ─── Routes to implement, by phase (§9) ──────────────────────────────────────
 //
@@ -81,6 +86,8 @@ await app.register(ordersApproveRoutes, { prefix: '/api/orders' });
 const start = async () => {
   try {
     await app.listen({ port: PORT, host: '0.0.0.0' });
+    // Drains OutboundEvent with 1s/4s/16s/60s backoff (§5.2).
+    startRetryWorker(app.log);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
