@@ -2,6 +2,9 @@
 
 To optimize your team of 5, here is a clean split between **"Small Potato"** tasks (ideal for manual coding or basic AI autocomplete chat) and **"Big Potato"** tasks (ideal for Claude Code Pro to run autonomously on complex logic).
 
+
+> **Companion doc.** This page answers *"who should take this task, given their tooling?"* — it splits by difficulty and Claude Pro access. [`WORKPLAN.md`](WORKPLAN.md) answers *"which files may I touch without colliding with a teammate?"* — it splits by file ownership so two people never edit the same file. Pick the person here; get their owned file globs there and in the service READMEs.
+
 ---
 
 ## 🥔 Small Potato Tasks (For the 2 without Claude Pro)

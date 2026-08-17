@@ -4,6 +4,8 @@ Every deployable is split into two **file-disjoint tracks**. Two people can take
 
 **Full detail — owned file globs, task tables, dependencies — lives in each service's own README.** This page is the map, not the territory.
 
+> **Two split documents, two different questions.** This one answers *"which files may I touch without colliding with someone?"* — it's about merge safety. [`tasks_split.md`](tasks_split.md) answers *"who on the team should take this, given their tooling?"* — it's about task difficulty and Claude Pro access. Use `tasks_split.md` to decide **who** takes a track; use this page and the service READMEs to know **which files** that track owns.
+
 > Enforcement: [CLAUDE.md §2](CLAUDE.md#2-part-ownership--read-this-before-editing-anything). Every Claude Code session must read its service README and establish its Part before editing.
 
 ---
