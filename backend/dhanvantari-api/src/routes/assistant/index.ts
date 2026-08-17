@@ -288,30 +288,37 @@ function templateNarration(e: Evidence): string {
   return e.summary;
 }
 
+const GROQ_MODEL = 'openai/gpt-oss-120b';
+
 async function narrate(question: string, e: Evidence): Promise<{ answer: string; source: 'llm' | 'template' }> {
-  const key = process.env.ANTHROPIC_API_KEY;
+  const key = process.env.GROQ_API_KEY;
   if (!key) return { answer: templateNarration(e), source: 'template' };
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8_000);
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       signal: ctrl.signal,
       body: JSON.stringify({
-        model: 'claude-sonnet-5',
+        model: GROQ_MODEL,
         max_tokens: 600,
         temperature: 0.2,
-        system:
-          'You explain inventory and supply data to hospital pharmacy staff. Answer using ONLY the JSON evidence provided. ' +
-          'Cite specific figures from it. If the evidence is insufficient, say so plainly. Never invent a number that is not in the evidence. Be concise — 2 to 4 sentences.',
-        messages: [{ role: 'user', content: `Question: ${question}\n\nEvidence:\n${JSON.stringify(e.data, null, 2)}` }],
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You explain inventory and supply data to hospital pharmacy staff. Answer using ONLY the JSON evidence provided. ' +
+              'Cite specific figures from it. If the evidence is insufficient, say so plainly. Never invent a number that is not in the evidence. Be concise — 2 to 4 sentences.',
+          },
+          { role: 'user', content: `Question: ${question}\n\nEvidence:\n${JSON.stringify(e.data, null, 2)}` },
+        ],
       }),
     });
     if (!res.ok) return { answer: templateNarration(e), source: 'template' };
-    const json = (await res.json()) as { content?: Array<{ text?: string }> };
-    const text = json.content?.map((c) => c.text ?? '').join('').trim();
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = json.choices?.[0]?.message?.content?.trim();
     return text ? { answer: text, source: 'llm' } : { answer: templateNarration(e), source: 'template' };
   } catch {
     return { answer: templateNarration(e), source: 'template' };

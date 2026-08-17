@@ -48,7 +48,7 @@ See [WORKPLAN.md](../../WORKPLAN.md) for the assignment table across all six dep
 - Server-side calls to Nidana, each with a deterministic TypeScript fallback (§3.2).
 
 **Must never leak to a client:**
-- `DATABASE_URL`, `MEDTRACK_SHARED_SECRET`, `ANTHROPIC_API_KEY`, `CLERK_SECRET_KEY`, `NIDANA_BASE_URL` internals, or raw Prisma errors/stack traces.
+- `DATABASE_URL`, `MEDTRACK_SHARED_SECRET`, `GROQ_API_KEY`, `CLERK_SECRET_KEY`, `NIDANA_BASE_URL` internals, or raw Prisma errors/stack traces.
 - Any row from the `dhanvantari` schema — this server never queries it and never will (§3.1, no cross-schema FKs, ever).
 - Raw SHAP feature names or LLM-generated SQL (there is no such thing here — §7.4).
 
@@ -95,7 +95,7 @@ curl localhost:4000/health
 | `VAYU_WEB_ORIGIN` | CORS allowlist for `frontend/vayu` (default `http://localhost:3000`) |
 | `NIDANA_BASE_URL` | Intelligence service base URL |
 | `NIDANA_FORCE_FALLBACK` | `true` forces the TS fallback path — test this before every demo (§3.2) |
-| `ANTHROPIC_API_KEY` | Assistant narration (§7.3) |
+| `GROQ_API_KEY` | Assistant narration (§7.3) |
 | `CLERK_SECRET_KEY` | Auth session verification |
 
 Never prefix any of these with `NEXT_PUBLIC_` — this is a backend service.
