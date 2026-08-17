@@ -122,7 +122,7 @@ Server-only values (never `NEXT_PUBLIC_*`):
 | `VAYU_API_URL` / `DHANVANTARI_API_URL` | Where each server reaches the other |
 | `VAYU_WEB_ORIGIN` / `DHANVANTARI_WEB_ORIGIN` | CORS allowlist |
 | `NIDANA_BASE_URL`, `NIDANA_FORCE_FALLBACK` | Intelligence service |
-| `ANTHROPIC_API_KEY` | RCA + assistant narration |
+| `GROQ_API_KEY` | RCA + assistant narration |
 | `CLERK_SECRET_KEY` | Auth |
 
 See [`.env.example`](../.env.example).

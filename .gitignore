@@ -36,6 +36,9 @@ services/nidana/models/*.joblib
 # generated synthetic data
 data-gen/out/
 
+# source dataset for backend/data-gen/seed_medtrack.mjs (large, machine-local)
+medtrack-datasets/
+
 # logs
 *.log
 npm-debug.log*

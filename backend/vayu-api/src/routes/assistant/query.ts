@@ -9,7 +9,7 @@
  * UI can render the evidence panel next to the answer. "Every answer ships with
  * the evidence panel that produced it — the user can check the model's work."
  *
- * The LLM is optional by design. Without ANTHROPIC_API_KEY, or if the call
+ * The LLM is optional by design. Without GROQ_API_KEY, or if the call
  * fails, a template narration is generated from the same evidence. An assistant
  * that dies when an API is rate-limited is not demo-safe (§7.4).
  */
@@ -29,37 +29,39 @@ const QueryBody = z.object({
   question: z.string().trim().min(1).max(500),
 });
 
-const MODEL = 'claude-sonnet-5';
+const GROQ_MODEL = 'openai/gpt-oss-120b';
 
 /**
  * Narrate strictly from the evidence. The prompt forbids inventing figures —
  * "It cannot invent a number, because it is never asked to produce one" (§6.3).
  */
 async function narrate(question: string, evidence: Evidence): Promise<{ answer: string; source: 'llm' | 'template' }> {
-  const key = process.env.ANTHROPIC_API_KEY;
+  const key = process.env.GROQ_API_KEY;
   if (!key) return { answer: templateNarration(evidence), source: 'template' };
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8_000);
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
+        authorization: `Bearer ${key}`,
       },
       signal: ctrl.signal,
       body: JSON.stringify({
-        model: MODEL,
+        model: GROQ_MODEL,
         max_tokens: 600,
         temperature: 0.2,
-        system:
-          'You explain supply-chain evidence to a pharmaceutical manufacturer. ' +
-          'Answer using ONLY the JSON evidence provided. Cite specific figures from it. ' +
-          'If the evidence is insufficient to answer, say so plainly. ' +
-          'Never invent a number that is not in the evidence. Be concise — 2 to 4 sentences.',
         messages: [
+          {
+            role: 'system',
+            content:
+              'You explain supply-chain evidence to a pharmaceutical manufacturer. ' +
+              'Answer using ONLY the JSON evidence provided. Cite specific figures from it. ' +
+              'If the evidence is insufficient to answer, say so plainly. ' +
+              'Never invent a number that is not in the evidence. Be concise — 2 to 4 sentences.',
+          },
           {
             role: 'user',
             content: `Question: ${question}\n\nEvidence:\n${JSON.stringify(evidence.data, null, 2)}`,
@@ -69,8 +71,8 @@ async function narrate(question: string, evidence: Evidence): Promise<{ answer: 
     });
 
     if (!res.ok) return { answer: templateNarration(evidence), source: 'template' };
-    const json = (await res.json()) as { content?: Array<{ text?: string }> };
-    const text = json.content?.map((c) => c.text ?? '').join('').trim();
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = json.choices?.[0]?.message?.content?.trim();
     return text
       ? { answer: text, source: 'llm' }
       : { answer: templateNarration(evidence), source: 'template' };
