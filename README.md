@@ -116,18 +116,20 @@ Phases are defined in [ARCHITECTURE.md §9](ARCHITECTURE.md#9-build-order).
 
 - [x] **Phase 0** — scaffold: monorepo, frontend/backend split, two Prisma schemas, contracts, HMAC helper
 - [ ] **Phase 1** — seed data
-- [ ] **Phase 2** — Vayu catalog, batch + QR, QC
-- [ ] **Phase 3** — 🔒 order loop end-to-end *(hard gate)*
-- [ ] **Phase 4** — shipment, simulator, SSE, live map + temp graph
-- [ ] **Phase 5** — excursion detection + cross-app warning
-- [ ] **Phase 6** — scan-in + complaint round-trip
-- [ ] **Phase 7** — risk score + drilldown
+- [x] **Phase 2** — Vayu catalog, batch + QR, QC *(vayu-api done; UI pending)*
+- [ ] **Phase 3** — 🔒 order loop end-to-end *(hard gate — vayu-api half done; needs dhanvantari-api)*
+- [x] **Phase 4** — SSE + sensor ingest *(vayu-api done; simulator + UI pending)*
+- [x] **Phase 5** — excursion detection *(vayu-api done; cross-app warning needs dhanvantari-api)*
+- [x] **Phase 6** — complaints + confirm-receipt *(vayu-api done; scan-in UI pending)*
+- [x] **Phase 7** — risk score + drilldown *(TS fallback done; Nidana pending)*
 - [ ] **Phase 8** — forecasting + SHAP
-- [ ] **Phase 9** — chatbot, both sides
+- [x] **Phase 9** — assistant *(vayu-api network scope done; dhanvantari side pending)*
 - [ ] **Phase 10** — RCA agent, scorecards, coverage gaps, routing
 - [ ] **Phase 11** — mobile, hardware, offline PWA
 
-Phase 0 is **structural only** — dependencies are not installed and nothing has been booted. The gate *"both apps boot, both connect"* is not yet met.
+**Phase 0 is green.** `npm install`, Docker Postgres, both schemas migrated, both API servers boot and answer `/health`. Verified: 15 tables in `vayu`, 10 in `dhanvantari`, **zero cross-schema foreign keys** (§3.1).
+
+`backend/vayu-api` is complete (Parts 1 and 2). Remaining work is `dhanvantari-api`, the two frontends, `nidana`, the simulator, and seed data.
 
 ---
 

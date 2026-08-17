@@ -95,6 +95,22 @@ These are cheap now and expensive to retrofit.
 
 ---
 
+## Gotchas that cost real time
+
+Two traps found while building `vayu-api`. Both are fixed in the repo — this is so you recognise the symptoms if they resurface.
+
+**Each service generates its own Prisma client.** Both schemas used to write to the shared `node_modules/.prisma/client`, so whoever ran `prisma generate` last silently overwrote the other server's models. Each `schema.prisma` now declares its own `output` dir.
+
+> **After pulling, run `npx prisma generate` inside your service directory**, not from the repo root.
+
+Symptom if this breaks: `Cannot read properties of undefined (reading 'findMany')` at runtime, on a file that typechecks cleanly.
+
+Related: `lib/prisma.ts` imports the client by **relative path**, not as `@prisma/client`. A bare specifier resolves against the *process* working directory, and `npm run dev:*` starts from the repo root — so it would pick up the hoisted root client. Don't "tidy" that import.
+
+**`.env` is loaded in `index.ts`, not via a flag.** `tsx watch` respawns a child process that doesn't inherit `--env-file`, so the secret silently goes missing on the first reload. Prisma reads `.env` on its own, which is why the database can work while `MEDTRACK_SHARED_SECRET` is undefined.
+
+---
+
 ## Environment
 
 Server-only values (never `NEXT_PUBLIC_*`):
