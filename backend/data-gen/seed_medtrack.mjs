@@ -278,11 +278,14 @@ async function main() {
     wrong_item: 'WRONG_ITEM',
     tampered: 'SEAL_TAMPERED',
   };
-  const knownBatch = new Set(batches.map((b) => b.batch_id));
   await prisma.complaint.createMany({
     data: complaints.map((c) => ({
       institutionId: c.institution_id,
-      batchId: null, // dataset complaints reference a drug, not a specific lot
+      // Dataset complaints name a drug directly and carry no lot, so drugId is
+      // the link. batchId stays null -- inventing a lot to satisfy a relation
+      // would be fabricating provenance.
+      drugId: c.drug_id || null,
+      batchId: null,
       category: CATEGORY_MAP[(c.category ?? '').toLowerCase()] ?? 'BREAKAGE',
       description: c.complaint_text || null,
       photoUrls: [],

@@ -48,6 +48,7 @@ model Drug {
   purchaseOrders  PurchaseOrder[]
   ledger          StockLedger[]
   currentStock    CurrentStock[]
+  complaints      Complaint[]
 
   @@schema("vayu")
 }
@@ -306,6 +307,10 @@ model Complaint {
   id              String            @id @default(uuid())
   shipmentId      String?
   batchId         String?
+  // A complaint is about a PRODUCT; the specific lot is optional detail. Going
+  // drug -> batch -> Complaint only works when the filer scanned a QR, and the
+  // dataset's field complaints name a drug directly with no lot at all.
+  drugId          String?
   institutionId   String?
   category        ComplaintCategory
   description     String?
@@ -318,6 +323,7 @@ model Complaint {
 
   shipment    Shipment?    @relation(fields: [shipmentId], references: [id])
   batch       Batch?       @relation(fields: [batchId], references: [id])
+  drug        Drug?        @relation(fields: [drugId], references: [id])
   institution Institution? @relation(fields: [institutionId], references: [id])
 
   @@index([status, filedAt])

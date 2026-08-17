@@ -133,6 +133,8 @@ export interface Complaint {
   status: string;
   assignedTeam: string | null;
   rcaJson: unknown;
+  /** Direct product link. Dataset complaints name a drug with no lot. */
+  drug?: { id: string; name: string; coldChain: boolean } | null;
   batch?: { lotNumber: string; drug: { name: string; coldChain: boolean } };
   institution?: { id: string; name: string; district: string | null };
   shipment?: { id: string; status: string; excursionCount: number };

@@ -126,7 +126,7 @@ export default function ComplaintsPage() {
                           </span>
                         </div>
                         <div style={{ font: `500 13px/1.5 ${FONT}`, color: C.ink, marginTop: 5 }}>
-                          {c.batch?.drug.name ?? 'Unknown drug'}
+                          {c.drug?.name ?? c.batch?.drug.name ?? 'Unknown drug'}
                         </div>
                         <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkGhost, marginTop: 2 }}>
                           {c.institution?.name ?? '—'}

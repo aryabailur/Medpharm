@@ -88,6 +88,10 @@ export async function complaintRoutes(app: FastifyInstance): Promise<void> {
         take,
         skip,
         include: {
+          // `drug` is the direct link (dataset complaints carry no lot);
+          // `batch.drug` is populated when the filer scanned a QR. The UI
+          // prefers drug and falls back to batch.drug.
+          drug: { select: { id: true, name: true, coldChain: true } },
           batch: { include: { drug: { select: { name: true, coldChain: true } } } },
           institution: { select: { id: true, name: true, district: true } },
           shipment: { select: { id: true, status: true, excursionCount: true } },
@@ -103,6 +107,7 @@ export async function complaintRoutes(app: FastifyInstance): Promise<void> {
     const c = await prisma.complaint.findUnique({
       where: { id: req.params.id },
       include: {
+        drug: true,
         batch: { include: { drug: true } },
         institution: true,
         shipment: { include: { excursions: { orderBy: { startedAt: 'asc' } } } },
