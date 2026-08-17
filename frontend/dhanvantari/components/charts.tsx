@@ -42,7 +42,7 @@ export function LineChart({
 
   if (series.length === 0) {
     return (
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
         <text x={W / 2} y={H / 2} textAnchor="middle" style={{ font: `400 11px ${FONT}`, fill: C.inkGhost }}>
           No data
         </text>
@@ -69,40 +69,42 @@ export function LineChart({
   const midIdx = Math.floor((n - 1) / 2);
 
   return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      {gridLines.map((gy, i) => (
-        <line key={i} x1={padL} x2={padL + innerW} y1={gy} y2={gy} stroke={C.borderSoft} strokeWidth={1} />
-      ))}
+    <div style={{ overflowX: 'auto' }}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+        {gridLines.map((gy, i) => (
+          <line key={i} x1={padL} x2={padL + innerW} y1={gy} y2={gy} stroke={C.borderSoft} strokeWidth={1} />
+        ))}
 
-      {showArea && <polygon points={areaPoints} fill={stroke} opacity={0.1} stroke="none" />}
+        {showArea && <polygon points={areaPoints} fill={stroke} opacity={0.1} stroke="none" />}
 
-      {n === 1 ? (
-        <circle cx={xAt(0)} cy={yAt(series[0].y)} r={3} fill={stroke} />
-      ) : (
-        <polyline points={points} fill="none" stroke={stroke} strokeWidth={1.5} />
-      )}
+        {n === 1 ? (
+          <circle cx={xAt(0)} cy={yAt(series[0].y)} r={3} fill={stroke} />
+        ) : (
+          <polyline points={points} fill="none" stroke={stroke} strokeWidth={1.5} />
+        )}
 
-      <text x={padL} y={padT - 2} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-        {max.toFixed(1)}
-        {yLabel ? ` ${yLabel}` : ''}
-      </text>
-      <text x={padL} y={H - 4} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-        {min.toFixed(1)}
-        {yLabel ? ` ${yLabel}` : ''}
-      </text>
-
-      <text x={padL} y={H - 2} textAnchor="start" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
-        {series[0]?.x}
-      </text>
-      {n > 2 && (
-        <text x={xAt(midIdx)} y={H - 2} textAnchor="middle" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
-          {series[midIdx]?.x}
+        <text x={padL} y={padT - 2} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+          {max.toFixed(1)}
+          {yLabel ? ` ${yLabel}` : ''}
         </text>
-      )}
-      <text x={padL + innerW} y={H - 2} textAnchor="end" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
-        {series[n - 1]?.x}
-      </text>
-    </svg>
+        <text x={padL} y={H - 4} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+          {min.toFixed(1)}
+          {yLabel ? ` ${yLabel}` : ''}
+        </text>
+
+        <text x={padL} y={H - 2} textAnchor="start" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+          {series[0]?.x}
+        </text>
+        {n > 2 && (
+          <text x={xAt(midIdx)} y={H - 2} textAnchor="middle" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+            {series[midIdx]?.x}
+          </text>
+        )}
+        <text x={padL + innerW} y={H - 2} textAnchor="end" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+          {series[n - 1]?.x}
+        </text>
+      </svg>
+    </div>
   );
 }
 
@@ -128,7 +130,7 @@ export function MultiLineChart({
 
   if (nonEmpty.length === 0) {
     return (
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
         <text x={W / 2} y={H / 2} textAnchor="middle" style={{ font: `400 11px ${FONT}`, fill: C.inkGhost }}>
           No data
         </text>
@@ -161,35 +163,37 @@ export function MultiLineChart({
           </div>
         ))}
       </div>
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-        {gridLines.map((gy, i) => (
-          <line key={i} x1={padL} x2={padL + innerW} y1={gy} y2={gy} stroke={C.borderSoft} strokeWidth={1} />
-        ))}
-        {nonEmpty.map((s) => {
-          if (s.points.length === 1) {
-            return <circle key={s.name} cx={xAt(0)} cy={yAt(s.points[0].y)} r={3} fill={s.color} />;
-          }
-          const pts = s.points.map((p, i) => `${xAt(i)},${yAt(p.y)}`).join(' ');
-          return <polyline key={s.name} points={pts} fill="none" stroke={s.color} strokeWidth={1.5} />;
-        })}
-        <text x={padL} y={padT - 2} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-          {max.toFixed(1)}
-        </text>
-        <text x={padL} y={H - 4} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-          {min.toFixed(1)}
-        </text>
-        <text x={padL} y={H - 2} textAnchor="start" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
-          {xLabelsSource.points[0]?.x}
-        </text>
-        {n > 2 && (
-          <text x={xAt(midIdx)} y={H - 2} textAnchor="middle" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
-            {xLabelsSource.points[midIdx]?.x}
+      <div style={{ overflowX: 'auto' }}>
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+          {gridLines.map((gy, i) => (
+            <line key={i} x1={padL} x2={padL + innerW} y1={gy} y2={gy} stroke={C.borderSoft} strokeWidth={1} />
+          ))}
+          {nonEmpty.map((s) => {
+            if (s.points.length === 1) {
+              return <circle key={s.name} cx={xAt(0)} cy={yAt(s.points[0].y)} r={3} fill={s.color} />;
+            }
+            const pts = s.points.map((p, i) => `${xAt(i)},${yAt(p.y)}`).join(' ');
+            return <polyline key={s.name} points={pts} fill="none" stroke={s.color} strokeWidth={1.5} />;
+          })}
+          <text x={padL} y={padT - 2} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+            {max.toFixed(1)}
           </text>
-        )}
-        <text x={padL + innerW} y={H - 2} textAnchor="end" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
-          {xLabelsSource.points[n - 1]?.x}
-        </text>
-      </svg>
+          <text x={padL} y={H - 4} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+            {min.toFixed(1)}
+          </text>
+          <text x={padL} y={H - 2} textAnchor="start" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+            {xLabelsSource.points[0]?.x}
+          </text>
+          {n > 2 && (
+            <text x={xAt(midIdx)} y={H - 2} textAnchor="middle" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+              {xLabelsSource.points[midIdx]?.x}
+            </text>
+          )}
+          <text x={padL + innerW} y={H - 2} textAnchor="end" style={{ font: `400 9px ${MONO}`, fill: C.inkGhost }}>
+            {xLabelsSource.points[n - 1]?.x}
+          </text>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -262,29 +266,31 @@ export function BarChart({
   const barW = Math.min(28, (W / data.length) * 0.6);
 
   return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      {data.map((d, i) => {
-        const cx = (i + 0.5) * (W / data.length);
-        const h = scale(d.value) * innerH;
-        const y = padT + innerH - h;
-        return (
-          <g key={i}>
-            <rect x={cx - barW / 2} y={y} width={barW} height={Math.max(h, 1)} fill={d.color ?? C.accent} />
-            <text x={cx} y={y - 4} textAnchor="middle" style={{ font: `500 10px ${MONO}`, fill: C.ink }}>
-              {fmt(d.value)}
-            </text>
-            <text
-              x={cx}
-              y={H - 8}
-              textAnchor="middle"
-              style={{ font: `400 9px ${FONT}`, fill: C.inkGhost }}
-            >
-              {d.label.length > 8 ? `${d.label.slice(0, 7)}…` : d.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+    <div style={{ overflowX: 'auto' }}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+        {data.map((d, i) => {
+          const cx = (i + 0.5) * (W / data.length);
+          const h = scale(d.value) * innerH;
+          const y = padT + innerH - h;
+          return (
+            <g key={i}>
+              <rect x={cx - barW / 2} y={y} width={barW} height={Math.max(h, 1)} fill={d.color ?? C.accent} />
+              <text x={cx} y={y - 4} textAnchor="middle" style={{ font: `500 10px ${MONO}`, fill: C.ink }}>
+                {fmt(d.value)}
+              </text>
+              <text
+                x={cx}
+                y={H - 8}
+                textAnchor="middle"
+                style={{ font: `400 9px ${FONT}`, fill: C.inkGhost }}
+              >
+                {d.label.length > 8 ? `${d.label.slice(0, 7)}…` : d.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 
@@ -335,46 +341,48 @@ export function ScatterPlot({
   const yAt = (v: number) => padT + innerH - scaleY(v) * innerH;
 
   return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      <line x1={padL} x2={padL} y1={padT} y2={padT + innerH} stroke={C.border} strokeWidth={1} />
-      <line x1={padL} x2={padL + innerW} y1={padT + innerH} y2={padT + innerH} stroke={C.border} strokeWidth={1} />
+    <div style={{ overflowX: 'auto' }}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+        <line x1={padL} x2={padL} y1={padT} y2={padT + innerH} stroke={C.border} strokeWidth={1} />
+        <line x1={padL} x2={padL + innerW} y1={padT + innerH} y2={padT + innerH} stroke={C.border} strokeWidth={1} />
 
-      <text x={padL} y={padT + innerH + 16} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-        {xMin.toFixed(0)}
-      </text>
-      <text x={padL + innerW} y={padT + innerH + 16} textAnchor="end" style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
-        {xMax.toFixed(0)}
-      </text>
-      {xLabel && (
-        <text x={padL + innerW / 2} y={H - 4} textAnchor="middle" style={{ font: `500 10px ${FONT}`, fill: C.inkSoft }}>
-          {xLabel}
+        <text x={padL} y={padT + innerH + 16} style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+          {xMin.toFixed(0)}
         </text>
-      )}
-      {yLabel && (
-        <text
-          x={-(padT + innerH / 2)}
-          y={12}
-          textAnchor="middle"
-          transform="rotate(-90)"
-          style={{ font: `500 10px ${FONT}`, fill: C.inkSoft }}
-        >
-          {yLabel}
+        <text x={padL + innerW} y={padT + innerH + 16} textAnchor="end" style={{ font: `500 10px ${MONO}`, fill: C.inkGhost }}>
+          {xMax.toFixed(0)}
         </text>
-      )}
-
-      {points.map((p, i) => (
-        <g key={i}>
-          <circle cx={xAt(p.x)} cy={yAt(p.y)} r={5} fill={p.color ?? C.accent} />
-          <text
-            x={xAt(p.x) + 8}
-            y={yAt(p.y) + 3}
-            style={{ font: `500 10px ${MONO}`, fill: C.inkMuted }}
-          >
-            {p.label}
+        {xLabel && (
+          <text x={padL + innerW / 2} y={H - 4} textAnchor="middle" style={{ font: `500 10px ${FONT}`, fill: C.inkSoft }}>
+            {xLabel}
           </text>
-        </g>
-      ))}
-    </svg>
+        )}
+        {yLabel && (
+          <text
+            x={-(padT + innerH / 2)}
+            y={12}
+            textAnchor="middle"
+            transform="rotate(-90)"
+            style={{ font: `500 10px ${FONT}`, fill: C.inkSoft }}
+          >
+            {yLabel}
+          </text>
+        )}
+
+        {points.map((p, i) => (
+          <g key={i}>
+            <circle cx={xAt(p.x)} cy={yAt(p.y)} r={5} fill={p.color ?? C.accent} />
+            <text
+              x={xAt(p.x) + 8}
+              y={yAt(p.y) + 3}
+              style={{ font: `500 10px ${MONO}`, fill: C.inkMuted }}
+            >
+              {p.label}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -403,24 +411,26 @@ export function Histogram({
   const barW = Math.min(36, (W / buckets.length) * 0.6);
 
   return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      {buckets.map((b, i) => {
-        const cx = (i + 0.5) * (W / buckets.length);
-        const h = scale(b.count) * innerH;
-        const y = padT + innerH - h;
-        return (
-          <g key={i}>
-            <rect x={cx - barW / 2} y={y} width={barW} height={Math.max(h, b.count > 0 ? 1 : 0)} fill={color ?? C.accent} />
-            <text x={cx} y={y - 4} textAnchor="middle" style={{ font: `500 10px ${MONO}`, fill: C.ink }}>
-              {b.count}
-            </text>
-            <text x={cx} y={H - 8} textAnchor="middle" style={{ font: `400 9px ${FONT}`, fill: C.inkGhost }}>
-              {b.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+    <div style={{ overflowX: 'auto' }}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+        {buckets.map((b, i) => {
+          const cx = (i + 0.5) * (W / buckets.length);
+          const h = scale(b.count) * innerH;
+          const y = padT + innerH - h;
+          return (
+            <g key={i}>
+              <rect x={cx - barW / 2} y={y} width={barW} height={Math.max(h, b.count > 0 ? 1 : 0)} fill={color ?? C.accent} />
+              <text x={cx} y={y - 4} textAnchor="middle" style={{ font: `500 10px ${MONO}`, fill: C.ink }}>
+                {b.count}
+              </text>
+              <text x={cx} y={H - 8} textAnchor="middle" style={{ font: `400 9px ${FONT}`, fill: C.inkGhost }}>
+                {b.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 
