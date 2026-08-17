@@ -37,6 +37,7 @@ export const C = {
   redTint: '#FBEAE8',
   green: '#186A3B',
   greenTint: '#E8F1EB',
+  greenDark: '#0F4C29',
   blue: '#175CD3',
   blueTint: '#E7F0F9',
   grey: '#5F5A53',
@@ -91,6 +92,7 @@ export function statusColors(status: string): { color: string; tint: string } {
     case 'WAREHOUSED':
     case 'MAJOR':
     case 'OPEN':
+      return { color: C.amber, tint: C.amberTint };
     case 'LOW':
       return { color: C.amber, tint: C.amberTint };
     case 'REJECTED':
@@ -126,3 +128,4 @@ export function rupees(n: number): string {
 }
 
 export const num = (n: number) => n.toLocaleString('en-IN');
+
