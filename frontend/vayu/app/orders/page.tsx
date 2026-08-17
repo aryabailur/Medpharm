@@ -1,33 +1,47 @@
 'use client';
 
 /**
- * Supply-order approval queue — the Phase 3 hard gate, manufacturer side.
- *
- * Approving here fires `order.status_changed` to Dhanvantari via the
- * OutboundEvent retry queue (§5.1), which is what flips the institution's view.
- *
- * Client Component: approve/reject are interactive and must refresh in place.
+ * Approvals — institutions request; the supplier approves, cuts, or rejects.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 
 import { approveOrder, getOrders, rejectOrder, type SupplyOrder } from '../../lib/api';
 import { C, FONT, MONO } from '../../lib/theme';
-import { ApiError, Button, Card, Empty, Mono, PageHeader, Pill, Table, Td } from '../../components/ui';
+import {
+  ApiError,
+  Button,
+  Card,
+  Empty,
+  Kpi,
+  Mono,
+  PageHeader,
+  Pill,
+  Segmented,
+  Table,
+  Td,
+} from '../../components/ui';
 
-const FILTERS = ['PENDING', 'APPROVED', 'PARTIAL', 'REJECTED', ''] as const;
+const FILTERS = [
+  { value: '', label: 'All' },
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'APPROVED', label: 'Approved' },
+  { value: 'PARTIAL', label: 'Partial' },
+  { value: 'REJECTED', label: 'Rejected' },
+];
 
-export default function OrdersPage() {
-  const [filter, setFilter] = useState<string>('PENDING');
+export default function Approvals() {
+  const [filter, setFilter] = useState('');
   const [orders, setOrders] = useState<SupplyOrder[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const q = filter ? `?status=${filter}&take=100` : '?take=100';
-      setOrders((await getOrders(q)).items);
+      const res = await getOrders(q);
+      setOrders(res.items);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -35,141 +49,159 @@ export default function OrdersPage() {
   }, [filter]);
 
   useEffect(() => {
-    void load();
+    load();
   }, [load]);
 
-  async function act(id: string, action: 'approve' | 'reject') {
-    setBusy(id);
+  const handleApprove = async (id: string) => {
+    setBusyId(id);
     try {
-      if (action === 'approve') await approveOrder(id);
-      else await rejectOrder(id, 'Rejected from approval queue');
+      await approveOrder(id);
       await load();
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setBusy(null);
+      setBusyId(null);
     }
-  }
+  };
+
+  const handleReject = async (id: string) => {
+    setBusyId(id);
+    try {
+      await rejectOrder(id, 'Rejected from approval queue');
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const pending = orders.filter((o) => o.status === 'PENDING').length;
+  const approved = orders.filter((o) => o.status === 'APPROVED').length;
+  const partial = orders.filter((o) => o.status === 'PARTIAL').length;
+  const rejected = orders.filter((o) => o.status === 'REJECTED').length;
 
   return (
     <>
       <PageHeader
-        title="Supply-order Approval Queue"
+        title="Supply-order Approvals"
         subtitle="Institutions request; the supplier approves, cuts, or rejects"
-        right={
-          <div style={{ display: 'flex', gap: 6 }}>
-            {FILTERS.map((f) => (
-              <button
-                key={f || 'ALL'}
-                onClick={() => setFilter(f)}
-                style={{
-                  padding: '6px 11px',
-                  borderRadius: 7,
-                  border: `1px solid ${filter === f ? C.steel : C.border}`,
-                  background: filter === f ? C.steelTint : C.surface,
-                  color: filter === f ? C.steel : C.inkFaint,
-                  font: `600 11px/1.2 ${FONT}`,
-                  cursor: 'pointer',
-                }}
-              >
-                {f || 'All'}
-              </button>
-            ))}
-          </div>
-        }
+        right={<Segmented options={FILTERS} value={filter} onChange={setFilter} />}
       />
 
-      <div style={{ padding: 28 }}>
-        {error ? (
-          <ApiError error={error} />
-        ) : (
-          <Card>
-            {orders.length === 0 ? (
-              <Empty>No orders with status {filter || 'any'}.</Empty>
-            ) : (
-              <Table head={['Order', 'Institution', 'Lines', 'Age', 'Status', '']}>
-                {orders.map((o) => (
-                  <>
-                    <tr key={o.id}>
+      <div style={{ padding: 28, display: 'grid', gap: 18 }}>
+        {error && <ApiError error={error} />}
+
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {filter === '' ? (
+            <>
+              <Kpi label="Pending" value={pending} deltaColor={C.accent} />
+              <Kpi label="Approved" value={approved} deltaColor={C.green} />
+              <Kpi label="Partial" value={partial} deltaColor={C.amber} />
+              <Kpi label="Rejected" value={rejected} deltaColor={C.red} />
+            </>
+          ) : (
+            <Kpi label={`${filter} total`} value={orders.length} />
+          )}
+        </div>
+
+        <Card>
+          {orders.length === 0 ? (
+            <Empty>No orders match this filter.</Empty>
+          ) : (
+            <Table head={['Order', 'Institution', 'Lines', 'Age', 'Status', '']}>
+              {orders.map((o) => {
+                const isOpen = expanded === o.id;
+                const busy = busyId === o.id;
+                return (
+                  <Fragment key={o.id}>
+                    <tr>
                       <Td>
-                        <button
-                          onClick={() => setExpanded(expanded === o.id ? null : o.id)}
-                          style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+                        <span
+                          onClick={() => setExpanded(isOpen ? null : o.id)}
+                          style={{ cursor: 'pointer' }}
                         >
-                          <Mono>{o.id.slice(0, 8)}</Mono>
-                        </button>
-                      </Td>
-                      <Td>
-                        <div style={{ color: C.ink, fontWeight: 500 }}>{o.institution?.name}</div>
-                        <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkGhost }}>
-                          {o.institution?.district}
-                        </div>
-                      </Td>
-                      <Td>
-                        {o.lines.length} line{o.lines.length === 1 ? '' : 's'}
-                        <div style={{ font: `400 11px/1.4 ${FONT}`, color: C.inkGhost }}>
-                          {o.lines.map((l) => l.drug?.name).filter(Boolean).slice(0, 2).join(', ')}
-                          {o.lines.length > 2 ? '…' : ''}
-                        </div>
-                      </Td>
-                      <Td>
-                        <span style={{ font: `500 12px/1 ${MONO}`, color: (o.ageHours ?? 0) >= 4 ? C.amber : C.inkFaint }}>
-                          {o.ageHours}h
+                          <Mono color={C.accent}>{o.id.slice(0, 8)}</Mono>
                         </span>
+                      </Td>
+                      <Td>{o.institution?.name ?? 'Unknown institution'}</Td>
+                      <Td>
+                        <Mono>{o.lines.length}</Mono>
+                      </Td>
+                      <Td style={{ color: (o.ageHours ?? 0) >= 4 ? C.amber : C.inkMuted }}>
+                        <Mono color={(o.ageHours ?? 0) >= 4 ? C.amber : C.inkMuted}>{o.ageHours}h</Mono>
                       </Td>
                       <Td>
                         <Pill label={o.status} />
                       </Td>
-                      <Td style={{ textAlign: 'right' }}>
+                      <Td>
                         {o.status === 'PENDING' && (
-                          <span style={{ display: 'inline-flex', gap: 6 }}>
-                            <Button onClick={() => act(o.id, 'approve')} disabled={busy === o.id}>
-                              {busy === o.id ? '…' : 'Approve'}
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <Button
+                              variant="primary"
+                              disabled={busy}
+                              onClick={() => handleApprove(o.id)}
+                            >
+                              Approve
                             </Button>
-                            <Button variant="danger" onClick={() => act(o.id, 'reject')} disabled={busy === o.id}>
+                            <Button
+                              variant="danger"
+                              disabled={busy}
+                              onClick={() => handleReject(o.id)}
+                            >
                               Reject
                             </Button>
-                          </span>
+                          </div>
                         )}
                       </Td>
                     </tr>
-                    {expanded === o.id && (
+                    {isOpen && (
                       <tr key={`${o.id}-detail`}>
-                        <Td style={{ background: '#FAFBFB' }} />
-                        <td colSpan={5} style={{ background: '#FAFBFB', padding: '10px 16px', borderBottom: `1px solid ${C.borderSoft}` }}>
-                          {o.lines.map((l) => (
-                            <div
-                              key={l.id}
-                              style={{
-                                display: 'flex',
-                                gap: 16,
-                                font: `400 12px/1.7 ${FONT}`,
-                                color: C.inkMuted,
-                              }}
-                            >
-                              <span style={{ minWidth: 200 }}>{l.drug?.name ?? l.drugId}</span>
-                              <span>requested {l.qtyRequested.toLocaleString()}</span>
-                              {l.qtyApproved != null && (
-                                <span style={{ color: l.qtyApproved < l.qtyRequested ? C.amber : C.green }}>
-                                  approved {l.qtyApproved.toLocaleString()}
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                          {o.rejectionReason && (
-                            <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.red, marginTop: 6 }}>
-                              Reason: {o.rejectionReason}
-                            </div>
-                          )}
+                        <td colSpan={6} style={{ background: C.surfaceAlt, padding: 0, borderBottom: `1px solid ${C.borderSoft}` }}>
+                          <div style={{ padding: '10px 16px 14px' }}>
+                            {o.rejectionReason && (
+                              <div style={{ font: `600 12px/1.5 ${FONT}`, color: C.red, marginBottom: 8 }}>
+                                {o.rejectionReason}
+                              </div>
+                            )}
+                            {o.lines.map((line) => {
+                              const full =
+                                line.qtyApproved != null && line.qtyApproved >= line.qtyRequested;
+                              const cut =
+                                line.qtyApproved != null && line.qtyApproved < line.qtyRequested;
+                              return (
+                                <div
+                                  key={line.id}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '6px 0',
+                                    borderBottom: `1px solid ${C.borderSoft}`,
+                                    font: `400 12px/1.5 ${FONT}`,
+                                    color: C.inkMuted,
+                                  }}
+                                >
+                                  <span>{line.drug?.name ?? 'Unknown drug'}</span>
+                                  <span style={{ display: 'flex', gap: 10 }}>
+                                    <Mono>requested {line.qtyRequested}</Mono>
+                                    <Mono color={cut ? C.amber : full ? C.green : C.inkGhost}>
+                                      approved {line.qtyApproved ?? '—'}
+                                    </Mono>
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </td>
                       </tr>
                     )}
-                  </>
-                ))}
-              </Table>
-            )}
-          </Card>
-        )}
+                  </Fragment>
+                );
+              })}
+            </Table>
+          )}
+        </Card>
       </div>
     </>
   );
