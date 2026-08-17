@@ -25,6 +25,12 @@ import cors from '@fastify/cors';
 import Fastify from 'fastify';
 
 import { startOutboundWorker } from './lib/outbound/sender.js';
+import { registerRawBodyParser } from './lib/webhooks/verify-middleware.js';
+import { webhookRoutes } from './lib/webhooks/receivers.js';
+import { assistantRoutes } from './routes/assistant/index.js';
+import { expoRoutes } from './routes/expo/index.js';
+import { streamRoutes } from './routes/stream/shipments.js';
+import { supplierScorecardRoutes } from './routes/supplier-scorecard/index.js';
 import { inventoryRoutes } from './routes/inventory/index.js';
 import { ordersListRoutes } from './routes/orders/list.js';
 import { ordersPlaceRoutes } from './routes/orders/place.js';
@@ -38,6 +44,10 @@ const app = Fastify({ logger: true });
 // Allows the web frontend and, on a LAN IP, the Expo client.
 await app.register(cors, { origin: [FRONTEND_ORIGIN], credentials: true });
 
+// Must come before any HMAC-verified route: the signature covers the exact
+// request bytes, so we keep the raw body alongside the parsed JSON.
+registerRawBodyParser(app);
+
 app.get('/health', async () => ({ ok: true, service: 'dhanvantari-api' }));
 
 // --- ROUTES: append registration below, one per line, do not reorder above ---
@@ -45,6 +55,11 @@ await app.register(inventoryRoutes, { prefix: '/api/inventory' });
 await app.register(posRoutes, { prefix: '/api/pos' });
 await app.register(ordersListRoutes, { prefix: '/api/orders' });
 await app.register(ordersPlaceRoutes, { prefix: '/api/orders' });
+await app.register(webhookRoutes, { prefix: '/api/webhooks/vayu' });
+await app.register(streamRoutes, { prefix: '/api/stream' });
+await app.register(expoRoutes, { prefix: '/api' });
+await app.register(supplierScorecardRoutes, { prefix: '/api/supplier-scorecard' });
+await app.register(assistantRoutes, { prefix: '/api/assistant' });
 
 // ─── Routes to implement, by phase (§9) ──────────────────────────────────────
 //
