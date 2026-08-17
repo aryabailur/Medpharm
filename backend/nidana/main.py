@@ -17,8 +17,12 @@ stubs. Implement per phase (§9): risk in Phase 7, forecast in Phase 8, RCA and
 routing in Phase 10.
 """
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Load before any router reads os.environ (rca_service reads GROQ_API_KEY).
+load_dotenv()
 
 from routers import assistant, forecast, rca, risk, route
 

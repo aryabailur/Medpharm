@@ -6,9 +6,18 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { getComplaints, setComplaintStatus, type Complaint } from '../../lib/api';
+import {
+  generateComplaintRca,
+  getComplaints,
+  getComplaintsRcaSummary,
+  setComplaintStatus,
+  type Complaint,
+  type RcaInsights,
+  type RcaSummary,
+} from '../../lib/api';
 import { C, FONT, MONO } from '../../lib/theme';
 import { ApiError, Button, Card, CardTitle, Empty, Kpi, KpiBand, PageHeader, Pill, Segmented } from '../../components/ui';
+import { RcaDashboard } from './RcaCharts';
 
 const FILTERS = [
   { value: '', label: 'All' },
@@ -27,6 +36,11 @@ export default function ComplaintsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const [rcaSummary, setRcaSummary] = useState<RcaSummary | null>(null);
+  const [rcaInsights, setRcaInsightsState] = useState<RcaInsights | null>(null);
+  const [rcaLoading, setRcaLoading] = useState(true);
+  const [rcaGenerating, setRcaGenerating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -49,7 +63,40 @@ export default function ComplaintsPage() {
     }
   }, [complaints, selectedId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setRcaLoading(true);
+    getComplaintsRcaSummary()
+      .then((r) => {
+        if (cancelled) return;
+        setRcaSummary(r.summary);
+        setRcaInsightsState(r.insights);
+      })
+      .catch(() => {
+        /* dashboard is a bonus panel — the complaint list above already reported the error */
+      })
+      .finally(() => {
+        if (!cancelled) setRcaLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Re-narrate once per mount; status-change refetches above don't need to re-trigger Groq.
+  }, []);
+
   const selected = complaints.find((c) => c.id === selectedId) ?? null;
+
+  async function runRca(id: string) {
+    setRcaGenerating(true);
+    try {
+      const rca = await generateComplaintRca(id);
+      setComplaints((prev) => prev.map((c) => (c.id === id ? { ...c, rcaJson: rca } : c)));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRcaGenerating(false);
+    }
+  }
 
   const open = complaints.filter((c) => c.status === 'OPEN').length;
   const investigating = complaints.filter((c) => c.status === 'INVESTIGATING').length;
@@ -84,6 +131,8 @@ export default function ComplaintsPage() {
 
       <div style={{ padding: 26, display: 'grid', gap: 18 }}>
         {error && <ApiError error={error} />}
+
+        <RcaDashboard summary={rcaSummary} insights={rcaInsights} loading={rcaLoading} />
 
         <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
           <Card style={{ flex: '1 1 380px', minWidth: 320, maxWidth: 440, animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
@@ -154,27 +203,55 @@ export default function ComplaintsPage() {
                   </div>
                 </div>
 
-                {selected.rcaJson != null && (
+                {selected.rcaJson == null ? (
                   <div>
-                    <div style={{ font: `600 10px/1 ${FONT}`, letterSpacing: '.14em', textTransform: 'uppercase', color: C.inkGhost, marginBottom: 6 }}>
-                      Evidence
+                    <Button onClick={() => runRca(selected.id)} disabled={rcaGenerating}>
+                      {rcaGenerating ? 'Analysing…' : 'Generate root-cause analysis'}
+                    </Button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ font: `600 10px/1 ${FONT}`, letterSpacing: '.14em', textTransform: 'uppercase', color: C.inkGhost }}>
+                        Root cause
+                      </div>
+                      <button
+                        onClick={() => runRca(selected.id)}
+                        disabled={rcaGenerating}
+                        style={{
+                          border: 0,
+                          background: 'transparent',
+                          color: C.accent,
+                          font: `600 11px/1.2 ${FONT}`,
+                          cursor: rcaGenerating ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {rcaGenerating ? '…' : 'Regenerate'}
+                      </button>
                     </div>
-                    <pre
-                      style={{
-                        font: `400 11px/1.5 ${MONO}`,
-                        background: C.greyTint,
-                        padding: 12,
-                        borderRadius: 4,
-                        maxHeight: 320,
-                        overflow: 'auto',
-                        whiteSpace: 'pre-wrap',
-                        margin: 0,
-                      }}
-                    >
-                      {JSON.stringify(selected.rcaJson, null, 2)}
-                    </pre>
-                    <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost, marginTop: 8 }}>
-                      The model never queries the database. It narrates a JSON evidence bundle assembled by code.
+                    <div style={{ font: `400 13px/1.6 ${FONT}`, color: C.inkMuted }}>
+                      {selected.rcaJson.probable_cause}
+                    </div>
+                    {selected.rcaJson.contributing_pattern && (
+                      <div style={{ font: `400 12.5px/1.6 ${FONT}`, color: C.amber, background: C.amberTint, padding: '8px 12px', borderRadius: 3 }}>
+                        {selected.rcaJson.contributing_pattern}
+                      </div>
+                    )}
+                    <div>
+                      <div style={{ font: `600 10px/1 ${FONT}`, letterSpacing: '.14em', textTransform: 'uppercase', color: C.inkGhost, marginBottom: 6 }}>
+                        Recommended actions
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 5 }}>
+                        {selected.rcaJson.recommended_actions.map((a, i) => (
+                          <li key={i} style={{ font: `400 12.5px/1.5 ${FONT}`, color: C.inkMuted }}>
+                            {a}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div style={{ font: `400 10.5px/1.4 ${MONO}`, color: C.inkGhost }}>
+                      narration: {selected.rcaJson.source} · the model never queries the database — it narrates a JSON
+                      evidence bundle assembled by code.
                     </div>
                   </div>
                 )}

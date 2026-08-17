@@ -124,6 +124,14 @@ export interface Excursion {
   acknowledged: boolean;
 }
 
+export interface RcaResult {
+  probable_cause: string;
+  contributing_pattern: string | null;
+  recommended_actions: string[];
+  source: 'nidana' | 'fallback';
+  generatedAt: string;
+}
+
 export interface Complaint {
   id: string;
   category: string;
@@ -132,12 +140,34 @@ export interface Complaint {
   filedAt: string;
   status: string;
   assignedTeam: string | null;
-  rcaJson: unknown;
+  rcaJson: RcaResult | null;
   /** Direct product link. Dataset complaints name a drug with no lot. */
   drug?: { id: string; name: string; coldChain: boolean } | null;
   batch?: { lotNumber: string; drug: { name: string; coldChain: boolean } };
   institution?: { id: string; name: string; district: string | null };
   shipment?: { id: string; status: string; excursionCount: number };
+}
+
+export interface RcaCategoryCount { category: string; count: number; pct: number }
+export interface RcaNamedCount { label: string; count: number }
+
+export interface RcaSummary {
+  totalComplaints: number;
+  byCategory: RcaCategoryCount[];
+  byTeam: RcaNamedCount[];
+  excursionSeverity: RcaNamedCount[];
+  monthlyTrend: RcaNamedCount[];
+}
+
+export interface RcaChartInsight { cause: string; suggestion: string }
+export interface RcaCategoryInsight extends RcaChartInsight { category: string }
+
+export interface RcaInsights {
+  categoryInsights: RcaCategoryInsight[];
+  teamInsight: RcaChartInsight;
+  excursionInsight: RcaChartInsight;
+  trendInsight: RcaChartInsight;
+  source: 'nidana' | 'fallback';
 }
 
 export interface TelemetryPoint {
@@ -202,6 +232,10 @@ export const setComplaintStatus = (id: string, status: string, resolutionNotes?:
     method: 'POST',
     body: JSON.stringify({ status, resolutionNotes }),
   });
+export const getComplaintsRcaSummary = () =>
+  api<{ summary: RcaSummary; insights: RcaInsights | null }>('/api/complaints/rca-summary');
+export const generateComplaintRca = (id: string) =>
+  api<RcaResult>(`/api/complaints/${id}/rca`, { method: 'POST' });
 
 export const askAssistant = (question: string) =>
   api<AssistantAnswer>('/api/assistant/query', {

@@ -4,6 +4,7 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
+python-dotenv==1.0.1
 
 # Forecasting: LightGBM point regressor + two quantile regressors
 # (alpha=0.10, alpha=0.90) for the P10/P90 band. §6.4
