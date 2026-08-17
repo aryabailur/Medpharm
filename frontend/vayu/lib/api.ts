@@ -206,3 +206,109 @@ export const askAssistant = (question: string) =>
     method: 'POST',
     body: JSON.stringify({ question }),
   });
+
+// ─── Analytics (§7.3, §10) ───────────────────────────────────────────────────
+//
+// Shaped server-side for direct charting — see
+// backend/vayu-api/src/routes/analytics/index.ts for the aggregation logic.
+
+export interface ConsumptionPoint {
+  month: string;
+  dispensed: number;
+  trueDemand: number;
+  unmet: number;
+  stockoutDays: number;
+  fulfilmentPct: number | null;
+}
+
+export interface ConsumptionResponse {
+  drug: { name: string; seasonalProfile: string | null; abcClass: string | null } | null;
+  series: ConsumptionPoint[];
+  seasonality: { peakMonth: string; troughMonth: string; ratio: number } | null;
+}
+
+export const getConsumption = (drugId: string, q = '') =>
+  api<ConsumptionResponse>(`/api/analytics/consumption?drugId=${encodeURIComponent(drugId)}${q}`);
+
+export interface VendorMetric {
+  vendorId: string;
+  name: string;
+  profile: string | null;
+  quotedLeadTimeDays: number | null;
+  pos: number;
+  onTimePct: number;
+  avgDelayDays: number;
+  priceVariancePct: number;
+  rejectionRatePct: number;
+  totalValueInr: number;
+}
+
+export const getVendorAnalytics = () => api<{ items: VendorMetric[] }>('/api/analytics/vendors');
+
+export interface FulfilmentRow {
+  district: string;
+  fulfilmentPct: number | null;
+  dispensed: number;
+  trueDemand: number;
+  stockoutDays: number;
+}
+
+export const getFulfilment = (q = '') =>
+  api<{ windowMonths: number; items: FulfilmentRow[] }>(`/api/analytics/fulfilment${q}`);
+
+export interface DiseasePoint {
+  month: string;
+  cases: number;
+  outbreak: boolean;
+}
+
+export const getDiseaseSignal = (q = '') =>
+  api<{ diseases: string[]; outbreakMonths: number; series: DiseasePoint[] }>(
+    `/api/analytics/disease${q}`,
+  );
+
+export interface StockHealthBucket {
+  label: string;
+  count: number;
+}
+
+export interface CriticalStockRow {
+  drug: string;
+  abcClass: string | null;
+  institution: string;
+  district: string | null;
+  quantityOnHand: number;
+  monthsOfStock: number | null;
+}
+
+export const getStockHealth = () =>
+  api<{
+    totalLines: number;
+    belowReorder: number;
+    buckets: StockHealthBucket[];
+    critical: CriticalStockRow[];
+  }>('/api/analytics/stock-health');
+
+export interface ExpiryBucket {
+  label: string;
+  batches: number;
+  units: number;
+  valueInr: number;
+}
+
+export const getExpiry = () => api<{ buckets: ExpiryBucket[] }>('/api/analytics/expiry');
+
+export interface AnalyticsSummary {
+  ledgerRows: number;
+  institutions: number;
+  facilities: number;
+  warehouses: number;
+  drugs: number;
+  vendors: number;
+  purchaseOrders: number;
+  districts: number;
+  horizon: { from: string | null; to: string | null };
+}
+
+/** Real network counts, so the dashboard never approximates its own scale. */
+export const getAnalyticsSummary = () => api<AnalyticsSummary>('/api/analytics/summary');
