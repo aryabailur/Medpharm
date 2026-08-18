@@ -8,91 +8,49 @@
  * Named for the Ayurvedic term for diagnosis. Every answer ships with the
  * evidence bundle that produced it, because that is the claim: the model never
  * queries the database, it narrates typed JSON assembled by hand-written
- * Prisma calls.
+ * Prisma calls. This screen's job is to make that evidence land visually: a
+ * chart of it, not just prose (see `components/assistant/EvidenceChart`).
  */
 
 import { useRef, useState } from 'react';
 
-import { askAssistant, type AssistantAnswer } from '../../lib/api';
-import { C, FONT, MONO, rise } from '../../lib/theme';
-import { EmptyState, LiveChip, Panel, PanelTitle } from '../../components/ui';
+import { askAssistant } from '../../lib/api';
+import {
+  C,
+  choreograph,
+  EASE_OUT,
+  FONT,
+  MONO,
+  pulse,
+  reveal,
+  scaleIn,
+  slideIn,
+} from '../../lib/theme';
+import { ApiError, EmptyState, LiveChip, Panel, PanelTitle, Skeleton } from '../../components/ui';
+import { EvidenceChart } from '../../components/assistant/EvidenceChart';
 
-/** The six demo questions (§11, 5:30). Pre-warming these is pre-flight. */
+/**
+ * `lib/api.ts`'s `AssistantAnswer` already carries `narration`/`ms` — this
+ * local alias just documents that this screen relies on both, without
+ * touching the shared file.
+ */
+type AssistantAnswer = Awaited<ReturnType<typeof askAssistant>>;
+
+/** The six demo questions (§11). The backend is tuned to answer these. */
 const PROMPTS = [
-  "what's pending approval",
   'where are we about to stock out',
+  'which institutions are least reliable',
   'what will we need next month',
-  'how many excursions this month',
-  'which institutions report the most damage',
-  'which drug is moving fastest',
+  'show me cold chain incidents',
+  'what is pending approval',
+  'which drugs are moving fastest',
 ];
 
 interface Turn {
   question: string;
   answer?: AssistantAnswer;
   error?: string;
-}
-
-/** Renders the evidence payload's shape without assuming a fixed schema —
- *  the intent decides what the data looks like, so this stays generic. */
-function EvidencePreview({ data }: { data: unknown }) {
-  if (data == null) return <span style={{ color: C.inkGhost }}>No evidence payload.</span>;
-  if (Array.isArray(data)) {
-    if (data.length === 0) return <span style={{ color: C.inkGhost }}>Empty evidence set.</span>;
-    return (
-      <div style={{ display: 'grid', gap: 6 }}>
-        {data.slice(0, 6).map((row, i) => (
-          <div
-            key={i}
-            style={{
-              padding: '7px 10px',
-              background: C.raised,
-              borderRadius: 3,
-              font: `400 11px/1.5 ${MONO}`,
-              color: C.inkMuted,
-              overflowX: 'auto',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {summarizeRow(row)}
-          </div>
-        ))}
-        {data.length > 6 && (
-          <div style={{ font: `400 10.5px/1.4 ${FONT}`, color: C.inkGhost }}>
-            + {data.length - 6} more row{data.length - 6 === 1 ? '' : 's'}
-          </div>
-        )}
-      </div>
-    );
-  }
-  if (typeof data === 'object') {
-    return (
-      <div
-        style={{
-          padding: '9px 11px',
-          background: C.raised,
-          borderRadius: 3,
-          font: `400 11px/1.6 ${MONO}`,
-          color: C.inkMuted,
-        }}
-      >
-        {summarizeRow(data)}
-      </div>
-    );
-  }
-  return <span style={{ font: `400 12px/1.5 ${MONO}`, color: C.inkMuted }}>{String(data)}</span>;
-}
-
-/** Flattens one evidence row to a compact `key: value · key: value` line. */
-function summarizeRow(row: unknown): string {
-  if (row == null || typeof row !== 'object') return String(row);
-  const entries = Object.entries(row as Record<string, unknown>).filter(
-    ([, v]) => typeof v !== 'object' || v === null,
-  );
-  return entries
-    .slice(0, 5)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join(' · ');
+  showEvidence?: boolean;
 }
 
 export default function AssistantPage() {
@@ -100,6 +58,7 @@ export default function AssistantPage() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   async function ask(question: string) {
     const q = question.trim();
@@ -114,12 +73,26 @@ export default function AssistantPage() {
       setTurns((t) => t.map((x, i) => (i === t.length - 1 ? { ...x, error: (e as Error).message } : x)));
     } finally {
       setBusy(false);
-      requestAnimationFrame(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }));
+      requestAnimationFrame(() => {
+        endRef.current?.scrollIntoView({ behavior: 'smooth' });
+        inputRef.current?.focus();
+      });
     }
   }
 
+  function toggleEvidence(i: number) {
+    setTurns((t) => t.map((x, idx) => (idx === i ? { ...x, showEvidence: !x.showEvidence } : x)));
+  }
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.45fr) minmax(0,1fr)', gap: 24, padding: '26px 26px 52px' }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0,1.45fr) minmax(0,1fr)',
+        gap: 24,
+        padding: '26px 26px 52px',
+      }}
+    >
       <Panel accent={C.accent} delayMs={0} style={{ display: 'flex', flexDirection: 'column', minHeight: 560 }}>
         <PanelTitle
           dot={C.accent}
@@ -128,92 +101,18 @@ export default function AssistantPage() {
           Nidana · network scope
         </PanelTitle>
 
-        <div style={{ flex: 1, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+        <div style={{ flex: 1, padding: 16, display: 'flex', flexDirection: 'column', gap: 18, overflowY: 'auto' }}>
           {turns.length === 0 ? (
             <EmptyState
               glyph="✦"
               title="Ask Nidana"
-              hint="Ask a question about the network, or pick a suggestion from Try. Every answer narrates a deterministic evidence bundle — never free-form SQL."
+              hint="Ask a question about the network, or pick a suggestion from Try. Every answer narrates a deterministic evidence bundle, charted from the real data — never free-form SQL, never a fabricated number."
               height={420}
             />
           ) : (
             <>
               {turns.map((t, i) => (
-                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 12, animation: i === turns.length - 1 ? rise(0) : undefined }}>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <div
-                      style={{
-                        maxWidth: '80%',
-                        background: '#F0EEEB',
-                        border: '1px solid #E4E2DF',
-                        borderRadius: 6,
-                        padding: '12px 14px',
-                        boxShadow: '0 1px 2px rgba(23,22,20,.04)',
-                      }}
-                    >
-                      <div style={{ font: `400 13px/1.65 ${FONT}`, color: C.ink }}>{t.question}</div>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                    <div
-                      style={{
-                        maxWidth: '86%',
-                        background: C.surface,
-                        border: '1px solid #E4E2DF',
-                        borderRadius: 6,
-                        padding: '13px 15px',
-                        boxShadow: '0 1px 2px rgba(23,22,20,.04)',
-                      }}
-                    >
-                      {t.error ? (
-                        <div style={{ font: `400 13px/1.65 ${FONT}`, color: C.red }}>{t.error}</div>
-                      ) : !t.answer ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, font: `400 13px/1.65 ${FONT}`, color: C.inkGhost }}>
-                          <span style={{ display: 'inline-flex', gap: 3 }}>
-                            <Dot delay={0} />
-                            <Dot delay={0.15} />
-                            <Dot delay={0.3} />
-                          </span>
-                          Thinking…
-                        </div>
-                      ) : (
-                        <>
-                          <div style={{ font: `400 13px/1.65 ${FONT}`, color: C.ink, whiteSpace: 'pre-wrap' }}>
-                            {t.answer.answer}
-                          </div>
-
-                          <div style={{ marginTop: 12, paddingTop: 11, borderTop: `1px solid ${C.borderSoft}` }}>
-                            <div
-                              style={{
-                                font: `600 10px/1 ${FONT}`,
-                                letterSpacing: '.13em',
-                                textTransform: 'uppercase',
-                                color: C.inkGhost,
-                                marginBottom: 8,
-                              }}
-                            >
-                              Evidence · {t.answer.evidence.summary}
-                            </div>
-                            <EvidencePreview data={t.answer.evidence.data} />
-                          </div>
-
-                          <div
-                            style={{
-                              font: `400 10.5px/1.5 ${MONO}`,
-                              color: C.inkFaint,
-                              marginTop: 10,
-                              paddingTop: 9,
-                              borderTop: `1px solid ${C.borderSoft}`,
-                            }}
-                          >
-                            {t.answer.intent} · narration: {t.answer.narration} · {t.answer.ms}ms
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <ChatTurn key={i} turn={t} isLast={i === turns.length - 1} onToggleEvidence={() => toggleEvidence(i)} />
               ))}
               <div ref={endRef} />
             </>
@@ -222,6 +121,7 @@ export default function AssistantPage() {
 
         <div style={{ padding: 18, borderTop: `1px solid ${C.border}`, display: 'flex', gap: 9 }}>
           <input
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -250,6 +150,7 @@ export default function AssistantPage() {
               borderRadius: 4,
               cursor: busy || !input.trim() ? 'not-allowed' : 'pointer',
               opacity: busy || !input.trim() ? 0.6 : 1,
+              transition: `opacity .15s ${EASE_OUT}`,
             }}
           >
             {busy ? '…' : 'Send'}
@@ -274,7 +175,7 @@ export default function AssistantPage() {
               alignItems: 'center',
               gap: 9,
               transition: 'background .15s ease, color .15s ease',
-              animation: rise(i * 40),
+              animation: slideIn('up', choreograph(1, i)),
             }}
             onMouseEnter={(e) => {
               if (!busy) e.currentTarget.style.background = C.surfaceAlt;
@@ -289,6 +190,185 @@ export default function AssistantPage() {
         ))}
       </Panel>
     </div>
+  );
+}
+
+function ChatTurn({
+  turn,
+  isLast,
+  onToggleEvidence,
+}: {
+  turn: Turn;
+  isLast: boolean;
+  onToggleEvidence: () => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, animation: isLast ? reveal(0) : undefined }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div
+          style={{
+            maxWidth: '80%',
+            background: '#F0EEEB',
+            border: '1px solid #E4E2DF',
+            borderRadius: 6,
+            padding: '12px 14px',
+            boxShadow: '0 1px 2px rgba(23,22,20,.04)',
+            animation: isLast ? slideIn('right', 0) : undefined,
+          }}
+        >
+          <div style={{ font: `400 13px/1.65 ${FONT}`, color: C.ink }}>{turn.question}</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+        <div
+          style={{
+            maxWidth: '92%',
+            width: turn.answer && !turn.error ? '92%' : undefined,
+            background: C.surface,
+            border: '1px solid #E4E2DF',
+            borderRadius: 6,
+            padding: turn.error ? '13px 15px' : 0,
+            overflow: 'hidden',
+            boxShadow: '0 1px 2px rgba(23,22,20,.04)',
+            animation: isLast ? slideIn('left', 80) : undefined,
+          }}
+        >
+          {turn.error ? (
+            <ApiError error={turn.error} service="vayu-api" />
+          ) : !turn.answer ? (
+            <ThinkingIndicator />
+          ) : (
+            <AnswerBody turn={turn} onToggleEvidence={onToggleEvidence} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThinkingIndicator() {
+  return (
+    <div style={{ padding: '13px 15px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, font: `400 13px/1.65 ${FONT}`, color: C.inkGhost }}>
+        <span style={{ display: 'inline-flex', gap: 3 }}>
+          <Dot delay={0} />
+          <Dot delay={0.15} />
+          <Dot delay={0.3} />
+        </span>
+        Thinking…
+      </div>
+      <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+        <Skeleton height={12} width="70%" />
+        <Skeleton height={120} />
+      </div>
+    </div>
+  );
+}
+
+function AnswerBody({ turn, onToggleEvidence }: { turn: Turn; onToggleEvidence: () => void }) {
+  const answer = turn.answer;
+  if (!answer) return null;
+  const narrationIsLlm = answer.narration === 'llm';
+
+  return (
+    <div>
+      <div style={{ padding: '13px 15px 4px' }}>
+        <div style={{ font: `400 13px/1.65 ${FONT}`, color: C.ink, whiteSpace: 'pre-wrap' }}>{answer.answer}</div>
+      </div>
+
+      <div style={{ padding: '4px 15px 14px' }}>
+        <EvidenceChart intent={answer.evidence.intent} data={answer.evidence.data} />
+      </div>
+
+      <button
+        onClick={onToggleEvidence}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          width: '100%',
+          padding: '9px 15px',
+          border: 'none',
+          borderTop: `1px solid ${C.borderSoft}`,
+          background: C.surfaceAlt,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <span
+          style={{
+            font: `600 10px/1 ${FONT}`,
+            letterSpacing: '.13em',
+            textTransform: 'uppercase',
+            color: C.inkGhost,
+          }}
+        >
+          Raw evidence · {answer.evidence.summary}
+        </span>
+        <span style={{ font: `600 10px/1 ${MONO}`, color: C.inkFaint }}>{turn.showEvidence ? '▲' : '▼'}</span>
+      </button>
+
+      {turn.showEvidence && (
+        <div style={{ padding: '11px 15px', borderTop: `1px solid ${C.borderSoft}`, animation: scaleIn(0, 0.28) }}>
+          <pre
+            style={{
+              margin: 0,
+              maxHeight: 260,
+              overflow: 'auto',
+              font: `400 10.5px/1.6 ${MONO}`,
+              color: C.inkMuted,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {JSON.stringify(answer.evidence.data, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+          padding: '9px 15px 11px',
+          borderTop: `1px solid ${C.borderSoft}`,
+        }}
+      >
+        <MetaChip label={answer.intent} tone={C.inkFaint} />
+        <MetaChip label={`${answer.ms}ms`} tone={C.inkFaint} />
+        <MetaChip
+          label={narrationIsLlm ? 'llm narration' : 'template narration'}
+          tone={narrationIsLlm ? C.accent : C.amber}
+          dot={narrationIsLlm ? C.accent : C.amber}
+        />
+      </div>
+    </div>
+  );
+}
+
+function MetaChip({ label, tone, dot }: { label: string; tone: string; dot?: string }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        height: 20,
+        padding: '0 8px',
+        borderRadius: 999,
+        background: `${tone}14`,
+        border: `1px solid ${tone}33`,
+        font: `500 10px/1.4 ${MONO}`,
+        color: tone,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {dot && <span style={{ width: 5, height: 5, borderRadius: '50%', background: dot, animation: pulse(2) }} />}
+      {label}
+    </span>
   );
 }
 
