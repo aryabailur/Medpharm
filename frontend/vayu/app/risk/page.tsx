@@ -134,11 +134,34 @@ export default function RiskPage() {
   const forecast = (forecastData ?? [])[selected] ?? (forecastData ?? [])[0] ?? null;
 
   const bc = top ? bandColors(top.band) : { color: C.grey, tint: C.greyTint };
+
+  /**
+   * The five signals do NOT share a unit, so they must not share a format.
+   * `cover_days` is a real day count, `below_reorder_point` is a boolean, and
+   * the rest are normalised 0..1 scores. Rendering all five as "0.00 / 1.00"
+   * made genuine data read as broken placeholders.
+   */
   const signals =
     top?.signals.map((s) => {
-      const pct = s.weight !== 0 ? Math.max(0, Math.min(100, (s.contribution / s.weight) * 100)) : 0;
-      const sc = pct >= 66 ? C.red : pct >= 40 ? C.amber : C.green;
-      return { label: humanizeDriver(s.name), value: s.value.toFixed(2), pct, color: sc, note: s.explanation };
+      // How much of this signal's available weight it actually contributed:
+      // that is what "is this signal firing" means, and it drives the bar.
+      const firing = s.weight !== 0 ? Math.max(0, Math.min(1, s.contribution / s.weight)) : 0;
+      const pct = firing * 100;
+      // A firing signal is a WARNING, so it reds out; a quiet one is healthy.
+      const sc = firing >= 0.66 ? C.red : firing >= 0.34 ? C.amber : C.green;
+
+      let value: string;
+      if (s.name === 'cover_days') {
+        // 999 is the scorer's "no consumption recorded" sentinel.
+        value = s.value >= 999 ? 'no offtake' : `${Math.round(s.value)}d`;
+      } else if (s.name === 'below_reorder_point') {
+        value = s.value >= 1 ? 'yes' : 'no';
+      } else {
+        // Normalised 0..1 signals read better as a percentage of their range.
+        value = `${Math.round(s.value * 100)}%`;
+      }
+
+      return { label: humanizeDriver(s.name), value, pct, color: sc, note: s.explanation };
     }) ?? [];
 
   const monthLabel = new Date().toLocaleDateString('en-GB', { month: 'long' });
