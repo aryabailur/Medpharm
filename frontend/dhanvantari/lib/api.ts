@@ -251,3 +251,18 @@ export const askAssistant = (question: string) =>
     method: 'POST',
     body: JSON.stringify({ question }),
   });
+
+/**
+ * Multi-line supply order — POST /api/orders. Unlike `reorder` (one line,
+ * forecast-backed, immediate), this places an editable, human-reviewed draft
+ * with any number of lines in a single request.
+ */
+export const placeOrder = (body: {
+  institutionId: string;
+  requestedWindow?: string;
+  lines: Array<{ drugId: string; qtyRequested: number }>;
+}) =>
+  api<{ ok: boolean; supplyOrderId: string; status: string }>('/api/orders', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });

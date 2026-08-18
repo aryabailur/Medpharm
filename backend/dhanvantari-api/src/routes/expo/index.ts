@@ -14,6 +14,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
+import { resolveInstitutionId } from '../../lib/identity.js';
 import { enqueue } from '../../lib/outbound/queue.js';
 import { prisma } from '../../lib/prisma.js';
 
@@ -196,7 +197,9 @@ export async function expoRoutes(app: FastifyInstance): Promise<void> {
       await enqueue(tx, 'complaint.file', {
         batchId: c.batchId,
         shipmentId: c.shipmentId,
-        institutionId: c.institutionId,
+        // The UI sends 'self'; Vayu's FK needs the real Institution id, which is
+        // why every complaint.file event was failing while orders got through.
+        institutionId: resolveInstitutionId(c.institutionId),
         category: c.category,
         description: c.description,
         photoUrls: c.photoUrls,
