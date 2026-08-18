@@ -5,6 +5,9 @@ node_modules/
 
 # builds
 .next/
+# `next build` output — kept separate from .next/ so a verification build
+# can't clobber the chunks a running `next dev` is serving. See next.config.mjs.
+.next-build/
 out/
 build/
 dist/
