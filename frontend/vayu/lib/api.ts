@@ -348,3 +348,63 @@ export interface AnalyticsSummary {
 
 /** Real network counts, so the dashboard never approximates its own scale. */
 export const getAnalyticsSummary = () => api<AnalyticsSummary>('/api/analytics/summary');
+
+// ─── Dispatch (create shipment) ──────────────────────────────────────────────
+
+export interface ShipmentBatchRow {
+  shipmentId: string;
+  batchId: string;
+  quantity: number;
+  batch: Batch & { drug: Drug };
+}
+
+export interface ShipmentShortfall {
+  drugId: string;
+  drugName: string;
+  requested: number;
+  allocated: number;
+}
+
+export interface CreatedShipment extends Shipment {
+  originWarehouseId: string | null;
+  destinationInstitution: string | null;
+  routePolyline: string | null;
+  batches: ShipmentBatchRow[];
+  shortfalls: ShipmentShortfall[];
+  /** Present (true) only on a `?dryRun=true` preview response — nothing was written. */
+  dryRun?: boolean;
+}
+
+export interface CreateShipmentError {
+  error: string;
+  message?: string;
+  shortfalls?: ShipmentShortfall[];
+  shipmentId?: string;
+}
+
+/**
+ * Preview or dispatch a shipment for an approved/partial supply order. The
+ * server mints the shipment id and auto-builds a FEFO manifest unless
+ * `batches` is supplied explicitly; `coldChain` is always server-derived.
+ *
+ * Pass `dryRun: true` to run the same allocation logic and get back the
+ * manifest a real create would produce, without writing anything — this is
+ * the "proposal" half of the product's confirm-before-commit rule. Pass
+ * `idempotencyKey` (e.g. a fresh id per confirm click) on a real (non-dry)
+ * call to make an accidental double-submit a no-op replay instead of a
+ * second shipment.
+ */
+export const createShipment = (
+  body: {
+    supplyOrderId: string;
+    originWarehouseId?: string;
+    etaAt?: string;
+    batches?: Array<{ batchId: string; quantity: number }>;
+  },
+  opts?: { dryRun?: boolean; idempotencyKey?: string },
+) =>
+  api<CreatedShipment>(`/api/shipments${opts?.dryRun ? '?dryRun=true' : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: opts?.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : undefined,
+  });
