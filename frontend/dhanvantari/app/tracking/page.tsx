@@ -36,6 +36,36 @@ function fmtTime(ts: string): string {
   return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * Excursion duration in the coarsest unit that still says something.
+ *
+ * The simulator compresses a multi-hour journey into seconds, so a real
+ * excursion can last well under a minute. Rounding those to "0 min" reads as a
+ * broken field, so anything below a minute is reported in seconds.
+ */
+function fmtDuration(mins: number | null | undefined): string {
+  if (mins == null) return '—';
+  if (mins < 1) return `${Math.max(1, Math.round(mins * 60))} s`;
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  return h > 0 ? `${h} h ${m} m` : `${m} min`;
+}
+
+/**
+ * An excursion's duration, preferring its own timestamps over `durationMin`.
+ *
+ * The API rounds `durationMin` to whole minutes, so a sub-minute excursion
+ * arrives as a literal 0. Recomputing from the event's start/end recovers the
+ * real span; `durationMin` is the fallback when the window isn't reported.
+ */
+function excursionDuration(e: ExcursionEvent): string {
+  if (e.startTs && e.endTs) {
+    const ms = new Date(e.endTs).getTime() - new Date(e.startTs).getTime();
+    if (Number.isFinite(ms) && ms >= 0) return fmtDuration(ms / 60000);
+  }
+  return fmtDuration(e.durationMin);
+}
+
 function fmtDate(d: string | null): string {
   if (!d) return '—';
   return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -176,7 +206,7 @@ function Inner() {
     const endT = excursion.endTs ? new Date(excursion.endTs).getTime() : t1;
     const from = Math.max(0, Math.min(1, (startT - t0) / span));
     const to = Math.max(0, Math.min(1, (endT - t0) / span));
-    return [{ from, to, label: `${excursion.severity} · ${excursion.durationMin ?? '—'} min` }];
+    return [{ from, to, label: `${excursion.severity} · ${excursionDuration(excursion)}` }];
   }, [excursion, points]);
 
   const ticks = useMemo(() => {
@@ -184,9 +214,20 @@ function Inner() {
     const n = points.length;
     const idxs = [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4), n - 1];
     const seen = new Set<number>();
+    // Below a couple of minutes every tick renders the same HH:MM, so the axis
+    // switches to seconds — the simulator's compressed clock makes that common.
+    const span = new Date(points[n - 1]!.ts).getTime() - new Date(points[0]!.ts).getTime();
+    const shortWindow = span < 2 * 60 * 1000;
     return idxs
       .filter((i) => !seen.has(i) && seen.add(i))
-      .map((i) => fmtTime(points[i]!.ts));
+      .map((i) =>
+        shortWindow
+          ? new Date(points[i]!.ts).toLocaleTimeString('en-GB', {
+              minute: '2-digit',
+              second: '2-digit',
+            })
+          : fmtTime(points[i]!.ts),
+      );
   }, [points]);
 
   // Lifecycle steps derived from real shipment/excursion state.
@@ -202,7 +243,7 @@ function Inner() {
       {
         label: hasExcursion ? 'Cold-chain excursion' : 'In transit',
         time: hasExcursion
-          ? `${excursion?.severity ?? 'EXCURSION'}${excursion?.durationMin != null ? ` · ${excursion.durationMin} min` : ''}`
+          ? `${excursion?.severity ?? 'EXCURSION'}${excursion ? ` · ${excursionDuration(excursion)}` : ''}`
           : `${Math.round((detail.progressPct ?? 0) * 100)}% of route`,
         dot: hasExcursion ? C.amber : C.blue,
         done: true,
@@ -248,7 +289,7 @@ function Inner() {
         shipmentId: detail.id,
         window: excursion.startTs && excursion.endTs ? `${fmtTime(excursion.startTs)}–${fmtTime(excursion.endTs)}` : '—',
         peak: excursion.peakTempC != null ? `${excursion.peakTempC.toFixed(1)} °C` : '—',
-        duration: excursion.durationMin != null ? `${excursion.durationMin} min` : '—',
+        duration: excursionDuration(excursion),
         severity: excursion.severity,
         outcome: 'Awaiting arrival · quarantine on receipt',
       },
@@ -345,7 +386,7 @@ function Inner() {
                     origin="ORIGIN"
                     destination="THIS INSTITUTION"
                     now={live ? `NOW · ${Math.round((detail.progressPct ?? 0) * 100)}%` : undefined}
-                    incident={excursion ? `EXCURSION${excursion.durationMin != null ? ` ${excursion.durationMin}m` : ''}` : undefined}
+                    incident={excursion ? `EXCURSION ${excursionDuration(excursion)}` : undefined}
                     stats={[
                       { label: 'ETA', value: detail.etaAt ? fmtDate(detail.etaAt) : '—' },
                       {

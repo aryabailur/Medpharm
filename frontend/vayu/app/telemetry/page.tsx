@@ -38,16 +38,38 @@ function fmtClock(ts: string | null): string {
   return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * Duration in the coarsest unit that still says something.
+ *
+ * The simulator compresses a multi-hour journey into seconds, so a real
+ * excursion can last well under a minute. Rounding those to "0 min" reads as a
+ * broken field, so anything under a minute is reported in seconds.
+ */
 function fmtDuration(mins: number | null): string {
   if (mins == null) return '—';
+  if (mins < 1) return `${Math.max(1, Math.round(mins * 60))} s`;
   const h = Math.floor(mins / 60);
   const m = Math.round(mins % 60);
   return h > 0 ? `${h} h ${m} m` : `${m} min`;
 }
 
+/**
+ * An excursion's duration, preferring its own timestamps over `durationMin`.
+ *
+ * The API rounds `durationMin` to whole minutes, so a sub-minute excursion
+ * arrives as a literal 0. Recomputing from startedAt/endedAt recovers the real
+ * span; `durationMin` is the fallback for records with no end timestamp.
+ */
+function excursionDuration(e: Excursion): string {
+  if (e.endedAt) {
+    const ms = new Date(e.endedAt).getTime() - new Date(e.startedAt).getTime();
+    if (Number.isFinite(ms) && ms >= 0) return fmtDuration(ms / 60000);
+  }
+  return fmtDuration(e.durationMin);
+}
+
 function fmtOpenDuration(startedAt: string): string {
-  const mins = Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 60000));
-  return fmtDuration(mins);
+  return fmtDuration(Math.max(0, (Date.now() - new Date(startedAt).getTime()) / 60000));
 }
 
 function Inner() {
@@ -218,13 +240,23 @@ function Inner() {
     from: asFraction(new Date(e.startedAt).getTime()),
     // An open excursion runs to the last reading we have.
     to: asFraction(e.endedAt ? new Date(e.endedAt).getTime() : seriesEnd),
-    label: `${e.severity} · ${fmtDuration(e.durationMin)}`,
+    label: `${e.severity} · ${excursionDuration(e)}`,
   }));
   const tickCount = 5;
+  // Below a couple of minutes every tick would render the same HH:MM, so the
+  // axis switches to seconds. The simulator's compressed clock makes that the
+  // common case, not an edge case.
+  const shortWindow = seriesSpan < 2 * 60 * 1000;
   const ticks = tempPoints.length
     ? Array.from({ length: tickCount }, (_, i) => {
         const idx = Math.round((i / (tickCount - 1)) * (tempPoints.length - 1));
-        return fmtClock(tempPoints[idx]!.ts);
+        const ts = tempPoints[idx]!.ts;
+        return shortWindow
+          ? new Date(ts).toLocaleTimeString('en-GB', {
+              minute: '2-digit',
+              second: '2-digit',
+            })
+          : fmtClock(ts);
       })
     : [];
 
@@ -334,7 +366,7 @@ function Inner() {
                     <div style={{ font: `600 15px/1.5 ${FONT}`, color: C.ink }}>
                       {shortId} out of band
                       {openExcursion.maxTempC != null ? ` — ${openExcursion.maxTempC.toFixed(1)} °C peak` : ''}
-                      {openExcursion.durationMin != null ? `, ${fmtDuration(openExcursion.durationMin)} above ${MAX_C} °C` : ''}
+                      {`, ${excursionDuration(openExcursion)} above ${MAX_C} °C`}
                     </div>
                     <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 3 }}>
                       Hysteresis fired {fmtClock(openExcursion.startedAt)} · {institutionName}
@@ -511,7 +543,7 @@ function Inner() {
                               {fmtClock(e.startedAt)}–{e.endedAt ? fmtClock(e.endedAt) : 'open'}
                             </td>
                             <td style={{ ...cellNum }}>{e.maxTempC != null ? `${e.maxTempC.toFixed(1)} °C` : '—'}</td>
-                            <td style={{ ...cellNum, color: C.inkMuted, fontWeight: 400 }}>{fmtDuration(e.durationMin)}</td>
+                            <td style={{ ...cellNum, color: C.inkMuted, fontWeight: 400 }}>{excursionDuration(e)}</td>
                             <td style={cellText}>
                               <span
                                 style={{

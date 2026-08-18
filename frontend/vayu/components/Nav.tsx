@@ -96,6 +96,8 @@ export default function Nav() {
         const res = await getShipments('?take=200');
         if (cancelled) return;
         setInFlight(res.items.filter((s) => IN_FLIGHT.includes(s.status)).length);
+        // excursionCount is the shipment's lifetime total, not what's currently
+        // open — the label says "excursions" rather than "open" to match.
         setOpenExcursions(res.items.reduce((a, s) => a + (s.excursionCount ?? 0), 0));
       } catch {
         /* leave the counters at zero */
@@ -337,7 +339,7 @@ export default function Nav() {
           <span style={{ font: `500 11px/1 ${MONO}`, color: C.ink }}>{inFlight} in flight</span>
           <span style={{ width: 1, height: 10, background: C.border }} />
           <span style={{ font: `500 11px/1 ${MONO}`, color: openExcursions > 0 ? C.amber : C.inkSoft }}>
-            {openExcursions} excursion{openExcursions === 1 ? '' : 's'} open
+            {openExcursions} excursion{openExcursions === 1 ? '' : 's'}
           </span>
         </div>
       </nav>
