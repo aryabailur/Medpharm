@@ -79,8 +79,23 @@ export async function batchRoutes(app: FastifyInstance): Promise<void> {
     const qr = req.query.qr?.trim();
     if (!qr) return reply.code(400).send({ error: 'missing_qr' });
 
+    // A human types a LOT NUMBER off the carton; a scanner sends the whole QR
+    // payload (`MT|B|<batch>|<lot>`). Matching only qrPayload/id meant the
+    // screen's own "QR payload or lot number" prompt was a lie for anyone
+    // typing. Accept all three, plus the lot embedded in a pasted payload.
+    const payloadLot = qr.includes('|') ? qr.split('|').pop()?.trim() : undefined;
     const batch = await prisma.batch.findFirst({
-      where: { OR: [{ qrPayload: qr }, { id: qr }] },
+      where: {
+        OR: [
+          { qrPayload: qr },
+          { id: qr },
+          { lotNumber: qr },
+          ...(payloadLot && payloadLot !== qr ? [{ lotNumber: payloadLot }] : []),
+          // Case-insensitive last resort so "bat000101" still finds BAT000101.
+          { lotNumber: { equals: qr, mode: 'insensitive' as const } },
+          { id: { equals: qr, mode: 'insensitive' as const } },
+        ],
+      },
       include: {
         drug: true,
         qcRecords: { orderBy: { testedAt: 'desc' }, take: 1 },
@@ -118,10 +133,29 @@ export async function batchRoutes(app: FastifyInstance): Promise<void> {
         drug: true,
         qcRecords: { orderBy: { testedAt: 'desc' } },
         shipmentBatch: { include: { shipment: true } },
+        // The trace screen promises "manufacture through complaint", but
+        // complaints were never included, so the last link in the custody chain
+        // was always missing. Include both the lot's own complaints and any
+        // filed against a shipment that carried it — a complaint often names
+        // only the shipment, since that is what the receiver scanned.
+        complaints: {
+          orderBy: { filedAt: 'desc' },
+          include: { institution: { select: { name: true, district: true } } },
+        },
       },
     });
 
     if (!batch) return reply.code(404).send({ error: 'not_found' });
-    return batch;
+
+    const shipmentIds = batch.shipmentBatch.map((sb) => sb.shipmentId);
+    const viaShipment = shipmentIds.length
+      ? await prisma.complaint.findMany({
+          where: { shipmentId: { in: shipmentIds }, batchId: null },
+          orderBy: { filedAt: 'desc' },
+          include: { institution: { select: { name: true, district: true } } },
+        })
+      : [];
+
+    return { ...batch, complaintsViaShipment: viaShipment };
   });
 }

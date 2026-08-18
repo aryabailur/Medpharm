@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { askAssistant, getFulfilment, type FulfilmentRow } from '../../lib/api';
 import { bandColors, C, EASE_OUT, FONT, MONO, rise } from '../../lib/theme';
 import { ApiError, EmptyState, Panel, PanelTitle, ScoreBadge, SkeletonRows } from '../../components/ui';
-import { BarChart, ForecastChart, Meter, SignalBars } from '../../components/charts';
+import { ForecastChart, Meter, SignalBars } from '../../components/charts';
 
 interface RiskSignal {
   name: string;
@@ -169,19 +169,6 @@ export default function RiskPage() {
   const history = forecast?.history.map((h) => ({ x: h.period, y: h.dispensed })) ?? [];
   const forecastPoints = forecast ? [{ x: 'Next', y: forecast.point }] : [];
   const band = forecast ? [{ hi: forecast.p90, lo: forecast.p10 }] : [];
-  // `magnitude` is a SHAP-style attribution in the model's own units, NOT a
-  // percentage — rendering it with a % suffix produced nonsense like "+34610%".
-  // Normalise to each driver's share of total attribution, which is the honest
-  // reading of "how much did this feature move the forecast".
-  const driverTotal =
-    forecast?.drivers.reduce((a, d) => a + Math.abs(d.magnitude), 0) ?? 0;
-  const drivers =
-    forecast?.drivers.map((d) => ({
-      label: humanizeDriver(d.label),
-      value: driverTotal > 0 ? Math.round((Math.abs(d.magnitude) / driverTotal) * 100) : 0,
-      color: d.direction === 'RISING' ? C.red : d.direction === 'FALLING' ? C.green : C.accent,
-    })) ?? [];
-
   const scoredRows = riskData ?? [];
   const criticalCount = scoredRows.filter((r) => r.band === 'CRITICAL').length;
   const highCount = scoredRows.filter((r) => r.band === 'HIGH').length;
@@ -340,32 +327,12 @@ export default function RiskPage() {
             ) : !forecast ? (
               <EmptyState title="No forecast" hint="No forecast data available for this pair." />
             ) : (
-              <>
-                <ForecastChart history={history} forecast={forecastPoints} band={band} yFormat={(v) => Math.round(v).toLocaleString('en-IN')} />
-                <div style={{ borderTop: `1px solid ${C.borderSoft}`, marginTop: 12, paddingTop: 12 }}>
-                  <div
-                    style={{
-                      font: `600 11px/1 ${FONT}`,
-                      letterSpacing: '.17em',
-                      textTransform: 'uppercase',
-                      color: C.inkFaint,
-                      marginBottom: 10,
-                    }}
-                  >
-                    Why the model says this
-                  </div>
-                  {drivers.length === 0 ? (
-                    <EmptyState height={100} title="No attribution" hint="No driver attribution available." />
-                  ) : (
-                    <>
-                      <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginBottom: 8 }}>
-                        Share of the model&apos;s attribution. Red drives demand up, green down.
-                      </div>
-                      <BarChart data={drivers} valueFormat={(v) => `${v}%`} />
-                    </>
-                  )}
-                </div>
-              </>
+              <ForecastChart
+                history={history}
+                forecast={forecastPoints}
+                band={band}
+                yFormat={(v) => Math.round(v).toLocaleString('en-IN')}
+              />
             )}
           </div>
         </Panel>

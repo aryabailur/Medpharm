@@ -18,7 +18,7 @@ import {
   type TelemetryPoint,
 } from '../../lib/api';
 import { C, FONT, GRAD, MONO, rise, SHADOW } from '../../lib/theme';
-import { EmptyState, Panel, PanelTitle } from '../../components/ui';
+import { EmptyState, Panel, PanelTitle, Pill } from '../../components/ui';
 import { AxisStrip, RouteMap, TemperatureChart } from '../../components/charts';
 
 type ShipmentBatchEntry = {
@@ -26,8 +26,25 @@ type ShipmentBatchEntry = {
   shipment: { id: string; status: string; dispatchedAt: string | null; deliveredAt: string | null };
 };
 
+interface TraceComplaint {
+  id: string;
+  category: string;
+  status: string;
+  description: string | null;
+  filedAt: string;
+  shipmentId: string | null;
+  institution?: { name: string; district: string | null } | null;
+}
+
 /** getBatch's full response nests the whole Drug row, not the narrow list-view pick. */
-type FullBatch = Omit<Batch, 'drug'> & { drug?: Drug; shipmentBatch?: ShipmentBatchEntry[] };
+type FullBatch = Omit<Batch, 'drug'> & {
+  drug?: Drug;
+  shipmentBatch?: ShipmentBatchEntry[];
+  /** Complaints naming this lot directly. */
+  complaints?: TraceComplaint[];
+  /** Complaints filed against a shipment that carried this lot. */
+  complaintsViaShipment?: TraceComplaint[];
+};
 
 function fmtDT(ts: string | null): string {
   if (!ts) return '—';
@@ -100,6 +117,13 @@ export default function Trace() {
   const openExcursion = excursions.find((e) => !e.endedAt) ?? excursions[0] ?? null;
 
   // Stage rail: manufacture -> QC -> shipments -> (excursion) -> current.
+  // Complaints close the custody chain: a lot's own, plus any filed against a
+  // shipment that carried it (receivers usually scan the shipment, not the lot).
+  const traceComplaints: TraceComplaint[] = [
+    ...(batch?.complaints ?? []),
+    ...(batch?.complaintsViaShipment ?? []),
+  ].sort((a, b) => new Date(b.filedAt).getTime() - new Date(a.filedAt).getTime());
+
   const stages: Stage[] = batch
     ? [
         { idx: '01', label: 'Manufactured', meta: fmtDT(batch.mfgDate), state: 'done' as const },
@@ -126,6 +150,16 @@ export default function Trace() {
                 label: `Excursion · ${openExcursion.severity}`,
                 meta: `${fmtClock(openExcursion.startedAt)}${openExcursion.endedAt ? `–${fmtClock(openExcursion.endedAt)}` : ' open'}`,
                 state: (openExcursion.severity === 'CRITICAL' ? 'bad' : 'warn') as Stage['state'],
+              },
+            ]
+          : []),
+        ...(traceComplaints.length
+          ? [
+              {
+                idx: '05',
+                label: `Complaint · ${traceComplaints[0]!.category.replace(/_/g, ' ')}`,
+                meta: `${traceComplaints.length} filed · latest ${fmtDT(traceComplaints[0]!.filedAt)}`,
+                state: (traceComplaints[0]!.status === 'RESOLVED' ? 'done' : 'bad') as Stage['state'],
               },
             ]
           : []),
@@ -398,6 +432,48 @@ export default function Trace() {
                       : 'No other shipments recorded for this batch.'}
                   </div>
                 </div>
+              </Panel>
+
+              {/* The last link in the chain: what the receiver actually complained
+                  about. Rendered only when a complaint exists — never a fabricated
+                  placeholder for a clean lot. */}
+              <Panel accent={traceComplaints.length ? C.red : C.green} delayMs={180}>
+                <PanelTitle dot={traceComplaints.length ? C.red : C.green}>
+                  Complaints on this lot
+                </PanelTitle>
+                {traceComplaints.length === 0 ? (
+                  <EmptyState
+                    glyph="✓"
+                    title="No complaints"
+                    hint="Nothing has been filed against this lot or the shipments that carried it."
+                    height={120}
+                  />
+                ) : (
+                  <div style={{ padding: '4px 14px 14px' }}>
+                    {traceComplaints.map((c) => (
+                      <div
+                        key={c.id}
+                        style={{ padding: '11px 0', borderBottom: `1px solid ${C.borderSoft}` }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <Pill label={c.category.replace(/_/g, ' ')} />
+                          <Pill label={c.status} />
+                          <span style={{ font: `400 11px/1.4 ${MONO}`, color: C.inkFaint, marginLeft: 'auto' }}>
+                            {fmtDT(c.filedAt)}
+                          </span>
+                        </div>
+                        <div style={{ font: `400 13px/1.6 ${FONT}`, color: C.ink, marginTop: 7 }}>
+                          {c.description ?? 'No description supplied.'}
+                        </div>
+                        <div style={{ font: `400 11px/1.6 ${FONT}`, color: C.inkFaint, marginTop: 5 }}>
+                          {c.institution?.name ?? 'Unknown institution'}
+                          {c.institution?.district ? ` · ${c.institution.district}` : ''}
+                          {c.shipmentId ? ` · via shipment ${c.shipmentId.slice(0, 8).toUpperCase()}` : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </Panel>
             </div>
           </div>
