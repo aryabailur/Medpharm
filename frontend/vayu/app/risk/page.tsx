@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 
 import { askAssistant, getFulfilment, type FulfilmentRow } from '../../lib/api';
-import { bandColors, C, FONT, MONO, rise } from '../../lib/theme';
+import { bandColors, C, EASE_OUT, FONT, MONO, rise } from '../../lib/theme';
 import { ApiError, EmptyState, Panel, PanelTitle, ScoreBadge, SkeletonRows } from '../../components/ui';
 import { BarChart, ForecastChart, Meter, SignalBars } from '../../components/charts';
 
@@ -182,14 +182,13 @@ export default function RiskPage() {
       color: d.direction === 'RISING' ? C.red : d.direction === 'FALLING' ? C.green : C.accent,
     })) ?? [];
 
-  const criticalCount = (riskData ?? []).filter((r) => r.band === 'CRITICAL').length;
-  const highCount = (riskData ?? []).filter((r) => r.band === 'HIGH').length;
-  const avgConfidenceAgree =
-    (riskData ?? []).length > 0
-      ? Math.round(
-          ((riskData ?? []).filter((r) => r.confidence === 'high').length / (riskData ?? []).length) * 100,
-        )
-      : null;
+  const scoredRows = riskData ?? [];
+  const criticalCount = scoredRows.filter((r) => r.band === 'CRITICAL').length;
+  const highCount = scoredRows.filter((r) => r.band === 'HIGH').length;
+  const mediumCount = scoredRows.filter((r) => r.band === 'MEDIUM').length;
+  const highConfCount = scoredRows.filter((r) => r.confidence === 'high').length;
+  /** Worst score on the board — the one figure that should draw the eye first. */
+  const peakScore = scoredRows.length ? Math.max(...scoredRows.map((r) => r.score)) : null;
 
   return (
     <>
@@ -210,22 +209,58 @@ export default function RiskPage() {
         </div>
         <div style={{ padding: '22px 24px', borderRight: `1px solid ${C.borderFaint}` }}>
           <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.15em', textTransform: 'uppercase', color: C.inkFaint }}>
-            Critical
+            Band mix
           </div>
-          <div style={{ font: `600 34px/1 ${MONO}`, marginTop: 10, color: C.red }}>{riskData ? criticalCount : '—'}</div>
+          {/* A single "critical" count read as 0 with no context. Showing the
+              whole band mix is what tells a reader the model discriminates. */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 10 }}>
+            {riskData ? (
+              <>
+                <span style={{ font: `600 34px/1 ${MONO}`, color: criticalCount ? C.red : C.inkGhost }}>{criticalCount}</span>
+                <span style={{ font: `500 11px/1 ${MONO}`, color: C.inkFaint, paddingBottom: 6 }}>crit</span>
+                <span style={{ font: `600 34px/1 ${MONO}`, color: C.amber, marginLeft: 6 }}>{highCount}</span>
+                <span style={{ font: `500 11px/1 ${MONO}`, color: C.inkFaint, paddingBottom: 6 }}>high</span>
+                <span style={{ font: `600 34px/1 ${MONO}`, color: C.accent, marginLeft: 6 }}>{mediumCount}</span>
+                <span style={{ font: `500 11px/1 ${MONO}`, color: C.inkFaint, paddingBottom: 6 }}>med</span>
+              </>
+            ) : (
+              <span style={{ font: `600 34px/1 ${MONO}`, color: C.ink }}>—</span>
+            )}
+          </div>
         </div>
         <div style={{ padding: '22px 24px', borderRight: `1px solid ${C.borderFaint}` }}>
           <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.15em', textTransform: 'uppercase', color: C.inkFaint }}>
-            High
+            Peak score
           </div>
-          <div style={{ font: `600 34px/1 ${MONO}`, marginTop: 10, color: C.amber }}>{riskData ? highCount : '—'}</div>
+          {/* Flash once on arrival — the worst number on the board earns one
+              attention beat, then settles. `key` remounts it so a refetch
+              replays the animation rather than sitting statically. */}
+          <div
+            key={peakScore ?? 'none'}
+            style={{
+              font: `600 34px/1 ${MONO}`,
+              marginTop: 10,
+              color: peakScore != null && peakScore >= 0.75 ? C.red : C.amber,
+              animation: riskData ? `mtRiskFlash 1.1s ${EASE_OUT} 1 both` : undefined,
+              borderRadius: 4,
+            }}
+          >
+            {peakScore != null ? peakScore.toFixed(2) : '—'}
+          </div>
         </div>
         <div style={{ padding: '22px 24px' }}>
           <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.15em', textTransform: 'uppercase', color: C.inkFaint }}>
-            High-confidence share
+            High confidence
           </div>
-          <div style={{ font: `600 34px/1 ${MONO}`, marginTop: 10, color: C.accent }}>
-            {avgConfidenceAgree != null ? `${avgConfidenceAgree}%` : '—'}
+          {/* Always paired with its denominator: a bare "100%" over a filtered
+              set read as fabricated, which is what it looked like before. */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginTop: 10 }}>
+            <span style={{ font: `600 34px/1 ${MONO}`, color: C.accent }}>{riskData ? highConfCount : '—'}</span>
+            {riskData && (
+              <span style={{ font: `500 12px/1 ${MONO}`, color: C.inkFaint, paddingBottom: 6 }}>
+                of {scoredRows.length} · 3+ of 5 signals agree
+              </span>
+            )}
           </div>
         </div>
       </div>
