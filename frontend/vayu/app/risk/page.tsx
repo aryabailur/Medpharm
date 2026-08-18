@@ -146,10 +146,16 @@ export default function RiskPage() {
   const history = forecast?.history.map((h) => ({ x: h.period, y: h.dispensed })) ?? [];
   const forecastPoints = forecast ? [{ x: 'Next', y: forecast.point }] : [];
   const band = forecast ? [{ hi: forecast.p90, lo: forecast.p10 }] : [];
+  // `magnitude` is a SHAP-style attribution in the model's own units, NOT a
+  // percentage — rendering it with a % suffix produced nonsense like "+34610%".
+  // Normalise to each driver's share of total attribution, which is the honest
+  // reading of "how much did this feature move the forecast".
+  const driverTotal =
+    forecast?.drivers.reduce((a, d) => a + Math.abs(d.magnitude), 0) ?? 0;
   const drivers =
     forecast?.drivers.map((d) => ({
       label: humanizeDriver(d.label),
-      value: d.magnitude,
+      value: driverTotal > 0 ? Math.round((Math.abs(d.magnitude) / driverTotal) * 100) : 0,
       color: d.direction === 'RISING' ? C.red : d.direction === 'FALLING' ? C.green : C.accent,
     })) ?? [];
 
@@ -293,7 +299,12 @@ export default function RiskPage() {
                   {drivers.length === 0 ? (
                     <EmptyState height={100} title="No attribution" hint="No driver attribution available." />
                   ) : (
-                    <BarChart data={drivers} valueFormat={(v) => `${v > 0 ? '+' : ''}${v}%`} />
+                    <>
+                      <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginBottom: 8 }}>
+                        Share of the model&apos;s attribution. Red drives demand up, green down.
+                      </div>
+                      <BarChart data={drivers} valueFormat={(v) => `${v}%`} />
+                    </>
                   )}
                 </div>
               </>
