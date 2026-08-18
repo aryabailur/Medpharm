@@ -19,6 +19,7 @@ import type { CSSProperties, ReactNode } from 'react';
 
 import {
   bandColors,
+  BORDER,
   C,
   countIn,
   FONT,
@@ -72,7 +73,15 @@ export function PageHeader({
 
 export function Card({ children, style }: { children: ReactNode; style?: CSSProperties }) {
   return (
-    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 3, ...style }}>
+    <div
+      style={{
+        background: C.surface,
+        border: BORDER.card,
+        borderRadius: 4,
+        boxShadow: SHADOW.sm,
+        ...style,
+      }}
+    >
       {children}
     </div>
   );
@@ -130,7 +139,8 @@ export function KpiBand({ children, columns = 5 }: { children: ReactNode; column
         display: 'grid',
         gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
         background: C.surface,
-        borderBottom: `1px solid ${C.border}`,
+        borderTop: BORDER.card,
+        borderBottom: BORDER.card,
       }}
     >
       {children}
@@ -153,7 +163,7 @@ export function Kpi({
   note?: string;
 }) {
   return (
-    <div style={{ padding: '26px 26px 24px', borderRight: `1px solid ${C.borderFaint}` }}>
+    <div style={{ padding: '26px 26px 24px', borderRight: BORDER.divider }}>
       <div style={LABEL}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 9, marginTop: 14 }}>
         <span
@@ -191,7 +201,7 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
                 textAlign: 'left',
                 padding: '8px 14px',
                 ...LABEL,
-                borderBottom: `1px solid ${C.borderSoft}`,
+                borderBottom: BORDER.divider,
                 background: C.surfaceAlt,
                 whiteSpace: 'nowrap',
               }}
@@ -273,7 +283,7 @@ export function Segmented({
   onChange: (v: string) => void;
 }) {
   return (
-    <div style={{ display: 'inline-flex', border: `1px solid ${C.border}`, borderRadius: 3, overflow: 'hidden' }}>
+    <div style={{ display: 'inline-flex', border: BORDER.inner, borderRadius: 4, overflow: 'hidden' }}>
       {options.map((o, i) => {
         const active = o.value === value;
         return (
@@ -359,9 +369,9 @@ export function Panel({
       style={{
         position: 'relative',
         background: C.surface,
-        border: `1px solid ${C.border}`,
+        border: BORDER.card,
         borderRadius: 6,
-        boxShadow: SHADOW.sm,
+        boxShadow: SHADOW.md,
         animation: riseScale(delayMs),
         transition: HOVER,
         ...style,
@@ -522,7 +532,7 @@ export function KpiHero({
       style={{
         position: 'relative',
         padding: '22px 24px 20px',
-        borderRight: `1px solid ${C.borderFaint}`,
+        borderRight: BORDER.divider,
         background: GRAD.band,
         animation: stagger(index),
         transition: HOVER,
