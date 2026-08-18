@@ -4,7 +4,6 @@
   "version": "1.0.0",
   "dependencies": {
     "@clerk/clerk-expo": "^2.20.0",
-    "@medtrack/contracts": "*",
     "expo": "~57.0.14",
     "expo-camera": "~57.0.3",
     "expo-constants": "~57.0.12",

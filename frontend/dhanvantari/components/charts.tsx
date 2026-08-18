@@ -532,6 +532,61 @@ export function Donut({
   );
 }
 
+/**
+ * Bare ring, for callers that render their own legend beside it.
+ *
+ * Same construction as `Donut` but without the built-in legend or centre
+ * total — the RCA dashboard pairs each slice with a narrated insight, so it
+ * needs the swatches inline with its own prose.
+ */
+export function PieChart({
+  data,
+  size = 140,
+}: {
+  data: Array<{ label: string; value: number; color: string }>;
+  size?: number;
+}) {
+  const total = data.reduce((a, d) => a + d.value, 0);
+  if (total === 0) return <NoData height={size} />;
+
+  const R = 46;
+  const CIRC = 2 * Math.PI * R;
+  let acc = 0;
+
+  return (
+    <svg
+      viewBox="0 0 120 120"
+      style={{ width: size, height: size, flex: `0 0 ${size}px`, animation: `mtFade .7s ease .15s both` }}
+    >
+      <circle cx={60} cy={60} r={R} fill="none" stroke={C.borderSoft} strokeWidth={15} />
+      {data
+        .filter((d) => d.value > 0)
+        .map((d) => {
+          const frac = d.value / total;
+          const seg = (
+            <circle
+              key={d.label}
+              cx={60}
+              cy={60}
+              r={R}
+              fill="none"
+              stroke={d.color}
+              strokeWidth={15}
+              strokeDasharray={`${(frac * CIRC).toFixed(1)} ${CIRC.toFixed(1)}`}
+              strokeDashoffset={(-acc * CIRC).toFixed(1)}
+              transform="rotate(-90 60 60)"
+            />
+          );
+          acc += frac;
+          return seg;
+        })}
+      <text x={60} y={65} textAnchor="middle" style={{ font: `600 22px ${MONO}`, fill: C.ink }}>
+        {total}
+      </text>
+    </svg>
+  );
+}
+
 // ─── Sparkline (area + stroke) ───────────────────────────────────────────────
 
 /**

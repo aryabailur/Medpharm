@@ -131,6 +131,8 @@ export function statusColors(status: string): { color: string; tint: string } {
     case 'QC_FAILED':
     case 'FAIL':
     case 'CRITICAL':
+    case 'ALL REJECTED':
+    case 'EXCURSION':
       return { color: C.red, tint: C.redTint };
     // DELIVERED, WAREHOUSED, CLOSED, MINOR, UNBILLED — settled and inert.
     default:
