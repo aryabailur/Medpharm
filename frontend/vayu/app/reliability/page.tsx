@@ -49,7 +49,7 @@ const SMALL_SAMPLE = 5;
 
 function readAs(accuracyPct: number, complaintRatePct: number, lagDaysAvg: number | null): { label: string; color: string; tint: string } {
   if (lagDaysAvg != null && lagDaysAvg > 2) return { label: 'SLOW TO CONFIRM', color: C.amber, tint: C.amberTint };
-  if (complaintRatePct > 15) return { label: 'HIGH COMPLAINT RATE', color: C.red, tint: C.redTint };
+  if (complaintRatePct > 15) return { label: 'COMPLAINT-HEAVY', color: C.red, tint: C.redTint };
   if (accuracyPct >= 80) return { label: 'PREDICTABLE', color: C.green, tint: C.greenTint };
   if (accuracyPct >= 55) return { label: 'STEADY', color: C.grey, tint: C.greyTint };
   return { label: 'ORDERS ERRATIC', color: C.red, tint: C.redTint };
@@ -64,7 +64,13 @@ export default function ReliabilityPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [o, c, s] = await Promise.all([getOrders('?take=300'), getComplaints('?take=300'), getShipments('?take=300')]);
+        // vayu-api caps `take` at 200 (Zod: .max(200)); asking for 300 made
+        // every one of these three calls 400, which blanked the whole panel.
+        const [o, c, s] = await Promise.all([
+          getOrders('?take=200'),
+          getComplaints('?take=200'),
+          getShipments('?take=200'),
+        ]);
         setOrders(o.items);
         setComplaints(c.items);
         setShipments(s.items);
@@ -148,6 +154,10 @@ export default function ReliabilityPage() {
     }
 
     for (const row of byInstitution.values()) {
+      // Complaints per 100 orders — an INDEX, not a percentage, and it can
+      // legitimately exceed 100 because one order can draw several complaints
+      // and the complaint history reaches further back than the order window.
+      // Presenting it as a "%" produced impossible-looking 500% cells.
       row.complaintRatePct = row.ordersPlaced > 0 ? (row.complaints / row.ordersPlaced) * 100 : 0;
       const verdict = readAs(row.accuracyPct, row.complaintRatePct, row.lagDaysAvg);
       row.label = verdict.label;
@@ -160,7 +170,7 @@ export default function ReliabilityPage() {
 
   const networkAvgAccuracy = rows.length ? rows.reduce((a, r) => a + r.accuracyPct, 0) / rows.length : null;
   const predictableCount = rows.filter((r) => r.label === 'PREDICTABLE').length;
-  const erraticCount = rows.filter((r) => r.label === 'ORDERS ERRATIC' || r.label === 'HIGH COMPLAINT RATE').length;
+  const erraticCount = rows.filter((r) => r.label === 'ORDERS ERRATIC' || r.label === 'COMPLAINT-HEAVY').length;
   const avgLagAll = (() => {
     const withLag = rows.filter((r) => r.lagDaysAvg != null);
     if (!withLag.length) return null;
@@ -294,7 +304,7 @@ export default function ReliabilityPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
               <thead>
                 <tr>
-                  {['Institution', 'Forecast accuracy', 'Delivery lag', 'Complaint rate', 'Upheld', 'Reads as'].map((h, i) => (
+                  {['Institution', 'Order accuracy', 'Delivery lag', 'Complaints / 100 orders', 'Upheld', 'Reads as'].map((h, i) => (
                     <th
                       key={h}
                       style={{
@@ -336,7 +346,8 @@ export default function ReliabilityPage() {
                       )}
                     </td>
                     <td style={{ ...cellNum, color: C.inkMuted, fontWeight: 400 }}>
-                      {r.complaintRatePct.toFixed(1)}%
+                      {/* Complaints per 100 orders, so it can exceed 100 — never suffix a "%". */}
+                      {r.complaints === 0 ? '—' : Math.round(r.complaintRatePct)}
                       {r.ordersPlaced < SMALL_SAMPLE && (
                         <div style={{ font: `400 9px/1.6 ${MONO}`, color: C.inkGhost }}>
                           {r.complaints} of {r.ordersPlaced}

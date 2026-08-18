@@ -23,14 +23,33 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import type { CSSProperties } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getIncoming, getInventory } from '../lib/api';
-import { C, EASE, EASE_IN_OUT, EASE_OUT, FONT, GRAD, MONO, pulse, SHADOW, SHELL, VIZ } from '../lib/theme';
+import { C, EASE, EASE_IN_OUT, EASE_OUT, EASE_SPRING, FONT, GRAD, MONO, pulse, SHADOW, SHELL, VIZ } from '../lib/theme';
 
 /** Dhanvantari's identity hue — a violet distinct from Vayu's teal, so the two
  * windows read as one product seen from two sides, not two products. */
 const IDENTITY = VIZ.violet;
+
+/**
+ * Local tokens for the command bar only — not in lib/theme.ts, so defined
+ * here per-app. Replaces the flat `GRAD.ink` fill with a bar that has real
+ * depth: a slightly warmer, less-flat base gradient with a faint violet
+ * bloom mixed in near the brand lockup, a 1px inner highlight along the top
+ * edge (the "glass" cue), and a dedicated bottom seam so the bar reads as a
+ * distinct plane from the nav row rather than just a darker rectangle.
+ */
+const BAR = {
+  /** Base fill: deep ink, slightly bluer than GRAD.ink's straight brown-black,
+   * with a soft brand-tinted glow washing in from the lockup corner. */
+  base: `radial-gradient(120% 180% at 0% 0%, ${IDENTITY}26 0%, rgba(19,15,26,0) 42%), linear-gradient(160deg,#211B26 0%,#18151B 46%,#131014 100%)`,
+  /** 1px top highlight — a lighter hairline just inside the top edge. */
+  topHighlight: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+  /** Bottom seam separating header from the nav row beneath it. */
+  bottomSeam: '0 1px 0 rgba(0,0,0,0.35)',
+} as const;
 
 interface Screen {
   href: string;
@@ -200,12 +219,12 @@ export default function Nav() {
           display: 'flex',
           alignItems: 'stretch',
           height: SHELL.headerH,
-          background: GRAD.ink,
-          borderBottom: `1px solid rgba(255,255,255,0.08)`,
+          background: BAR.base,
+          borderBottom: `1px solid rgba(0,0,0,0.4)`,
           position: 'sticky',
           top: 0,
           zIndex: 6,
-          boxShadow: SHADOW.md,
+          boxShadow: `${BAR.topHighlight}, ${BAR.bottomSeam}, ${SHADOW.md}`,
         }}
       >
         <div
@@ -214,15 +233,16 @@ export default function Nav() {
             alignItems: 'center',
             gap: 12,
             padding: '0 20px',
-            borderRight: `1px solid rgba(255,255,255,0.08)`,
+            borderRight: `1px solid rgba(255,255,255,0.07)`,
+            flex: '0 0 auto',
           }}
         >
           <Monogram hue={IDENTITY} />
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
-            <span style={{ font: `600 10px/1 ${MONO}`, letterSpacing: '.22em', color: 'rgba(255,255,255,0.45)' }}>
+            <span style={{ font: `600 10px/1 ${MONO}`, letterSpacing: '.22em', color: 'rgba(255,255,255,0.42)' }}>
               MEDTRACK
             </span>
-            <span style={{ width: 1, height: 11, background: 'rgba(255,255,255,0.18)', display: 'inline-block' }} />
+            <span style={{ width: 1, height: 11, background: 'rgba(255,255,255,0.16)', display: 'inline-block' }} />
             <span style={{ font: `700 19px/1 ${FONT}`, letterSpacing: '-.02em', color: '#FFFFFF' }}>Dhanvantari</span>
           </div>
           <span
@@ -231,10 +251,12 @@ export default function Nav() {
               letterSpacing: '.12em',
               textTransform: 'uppercase',
               color: IDENTITY,
-              background: `${IDENTITY}26`,
-              border: `1px solid ${IDENTITY}55`,
+              background: `linear-gradient(180deg, ${IDENTITY}30 0%, ${IDENTITY}1C 100%)`,
+              border: `1px solid ${IDENTITY}4D`,
               borderRadius: 999,
-              padding: '4px 9px',
+              padding: '4px 10px',
+              boxShadow: `inset 0 1px 0 ${IDENTITY}22`,
+              whiteSpace: 'nowrap',
             }}
           >
             Institution
@@ -255,7 +277,7 @@ export default function Nav() {
           <span
             style={{
               font: `400 11px/1.4 ${MONO}`,
-              color: 'rgba(255,255,255,0.5)',
+              color: 'rgba(255,255,255,0.48)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -274,23 +296,23 @@ export default function Nav() {
             gap: 10,
             alignSelf: 'center',
             marginRight: 14,
-            background: 'rgba(255,255,255,0.07)',
-            border: `1px solid rgba(255,255,255,0.13)`,
-            borderRadius: 7,
+            background: 'rgba(255,255,255,0.055)',
+            border: `1px solid rgba(255,255,255,0.14)`,
+            borderRadius: 8,
             padding: '8px 12px',
             flex: '1 6 220px',
             minWidth: 130,
-            maxWidth: 280,
+            maxWidth: 300,
             cursor: 'pointer',
-            boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.18)',
+            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.03)',
             transition: `background .16s ${EASE_OUT}, border-color .16s ${EASE_OUT}, box-shadow .16s ${EASE_OUT}`,
           }}
         >
-          <span style={{ font: `400 12px/1 ${MONO}`, color: 'rgba(255,255,255,0.4)' }}>⌕</span>
+          <span style={{ font: `400 13px/1 ${MONO}`, color: 'rgba(255,255,255,0.42)' }}>⌕</span>
           <span
             style={{
               font: `400 12px/1 ${FONT}`,
-              color: 'rgba(255,255,255,0.45)',
+              color: 'rgba(255,255,255,0.46)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -302,10 +324,11 @@ export default function Nav() {
             style={{
               marginLeft: 'auto',
               font: `500 10px/1 ${MONO}`,
-              color: 'rgba(255,255,255,0.55)',
-              border: `1px solid rgba(255,255,255,0.16)`,
-              borderRadius: 3,
-              padding: '3px 5px',
+              color: 'rgba(255,255,255,0.6)',
+              border: `1px solid rgba(255,255,255,0.18)`,
+              borderRadius: 4,
+              padding: '3px 6px',
+              background: 'rgba(255,255,255,0.04)',
             }}
           >
             ⌘K
@@ -318,7 +341,7 @@ export default function Nav() {
             alignItems: 'center',
             gap: 9,
             padding: '0 20px',
-            borderLeft: `1px solid rgba(255,255,255,0.08)`,
+            borderLeft: `1px solid rgba(255,255,255,0.07)`,
           }}
         >
           <span
@@ -370,14 +393,16 @@ export default function Nav() {
                 position: 'relative',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
-                padding: '0 20px',
+                gap: 7,
+                padding: '0 16px',
                 border: 0,
                 background: 'transparent',
                 color: active ? C.ink : C.inkFaint,
                 font: `600 13px/1 ${FONT}`,
-                letterSpacing: '.12em',
+                letterSpacing: '.09em',
                 textTransform: 'uppercase',
+                whiteSpace: 'nowrap',
+                flex: '0 0 auto',
                 cursor: 'pointer',
                 transition: `color .16s ${EASE_OUT}`,
               }}
@@ -387,8 +412,8 @@ export default function Nav() {
               <span
                 style={{
                   position: 'absolute',
-                  left: 12,
-                  right: 12,
+                  left: 10,
+                  right: 10,
                   bottom: 0,
                   height: 2,
                   borderRadius: '2px 2px 0 0',
@@ -419,11 +444,15 @@ export default function Nav() {
             Store
           </span>
           <span
+            className="mt-chip"
             style={{
-              padding: '3px 9px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '4px 10px',
               borderRadius: 999,
               background: belowReorder > 0 ? `${C.red}14` : C.greyTint,
-              border: `1px solid ${belowReorder > 0 ? C.red + '44' : C.borderSoft}`,
+              border: `1px solid ${belowReorder > 0 ? C.red + '48' : C.borderSoft}`,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.5)`,
               font: `600 11px/1.4 ${MONO}`,
               color: belowReorder > 0 ? C.red : C.inkSoft,
             }}
@@ -431,11 +460,15 @@ export default function Nav() {
             {belowReorder} below reorder
           </span>
           <span
+            className="mt-chip"
             style={{
-              padding: '3px 9px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '4px 10px',
               borderRadius: 999,
               background: inboundExcursions > 0 ? `${C.amber}18` : C.greyTint,
-              border: `1px solid ${inboundExcursions > 0 ? C.amber + '44' : C.borderSoft}`,
+              border: `1px solid ${inboundExcursions > 0 ? C.amber + '48' : C.borderSoft}`,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.5)`,
               font: `600 11px/1.4 ${MONO}`,
               color: inboundExcursions > 0 ? C.amber : C.inkSoft,
             }}
@@ -514,15 +547,15 @@ export default function Nav() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(15,14,12,0.5)',
-            backdropFilter: 'blur(4px)',
-            WebkitBackdropFilter: 'blur(4px)',
+            background: 'rgba(13,12,11,0.55)',
+            backdropFilter: 'blur(5px)',
+            WebkitBackdropFilter: 'blur(5px)',
             zIndex: 50,
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'center',
             paddingTop: '12vh',
-            animation: 'mtFade .16s ease both',
+            animation: 'mtFade .18s ease both',
           }}
         >
           <div
@@ -532,10 +565,10 @@ export default function Nav() {
               maxWidth: '92vw',
               background: C.surface,
               border: `1px solid ${C.border}`,
-              borderRadius: 10,
+              borderRadius: 12,
               overflow: 'hidden',
-              boxShadow: SHADOW.lg,
-              animation: `mtScaleIn .22s cubic-bezier(.34,1.56,.64,1) both`,
+              boxShadow: `${SHADOW.lg}, 0 0 0 1px rgba(23,22,20,0.03)`,
+              animation: `mtScaleIn .24s ${EASE_SPRING} both`,
             }}
           >
             <div
@@ -580,7 +613,7 @@ export default function Nav() {
                   font: `400 10px/1 ${MONO}`,
                   color: C.inkSoft,
                   border: `1px solid ${C.border}`,
-                  borderRadius: 3,
+                  borderRadius: 4,
                   padding: '3px 5px',
                 }}
               >
@@ -627,6 +660,7 @@ export default function Nav() {
                               border: 0,
                               borderLeft: `2px solid ${highlighted ? IDENTITY : 'transparent'}`,
                               background: highlighted ? `${IDENTITY}12` : 'transparent',
+                              boxShadow: highlighted ? `inset 0 1px 0 rgba(255,255,255,0.6)` : 'none',
                               cursor: 'pointer',
                               textAlign: 'left',
                               transition: `background .12s ${EASE_OUT}, border-color .12s ${EASE_OUT}`,
@@ -659,18 +693,28 @@ export default function Nav() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 14,
+                gap: 16,
                 padding: '9px 16px',
                 borderTop: `1px solid ${C.borderSoft}`,
                 background: C.surfaceAlt,
-                font: `400 10px/1 ${MONO}`,
+                font: `500 10px/1 ${MONO}`,
                 color: C.inkGhost,
+                letterSpacing: '.02em',
               }}
             >
-              <span>↑↓ navigate</span>
-              <span>↵ select</span>
-              <span>esc close</span>
-              <span style={{ marginLeft: 'auto' }}>{hits.length} result{hits.length === 1 ? '' : 's'}</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <kbd style={KBD}>↑</kbd>
+                <kbd style={KBD}>↓</kbd> navigate
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <kbd style={KBD}>↵</kbd> select
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <kbd style={KBD}>esc</kbd> close
+              </span>
+              <span style={{ marginLeft: 'auto', color: C.inkSoft }}>
+                {hits.length} result{hits.length === 1 ? '' : 's'}
+              </span>
             </div>
           </div>
         </div>
@@ -678,6 +722,21 @@ export default function Nav() {
     </>
   );
 }
+
+/** Footer key-cap chip for the ⌘K palette's hint strip. */
+const KBD: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 15,
+  padding: '2px 4px',
+  borderRadius: 3,
+  border: `1px solid ${C.border}`,
+  background: C.surface,
+  boxShadow: '0 1px 0 rgba(23,22,20,0.06)',
+  color: C.inkSoft,
+  font: `600 10px/1 ${MONO}`,
+};
 
 /** Page title + meta for the active route, so screens don't restate them. */
 export function useScreenMeta() {

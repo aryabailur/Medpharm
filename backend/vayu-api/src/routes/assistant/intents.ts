@@ -54,18 +54,33 @@ export interface Evidence {
  */
 export function classifyByKeyword(q: string): Intent {
   const s = q.toLowerCase();
+  // Diagnosis needs the causal framing ("why"/"reason") — otherwise a bare
+  // "low stock" question is really asking for the risk list, not a diagnosis.
   if (/(why|reason).*(low|out of stock|stockout|running out)/.test(s)) return 'diagnosis.stockout';
-  if (/(forecast|predict|will need|next month|demand)/.test(s)) return 'demand.forecast';
-  if (/(risk|about to stock out|going to run out)/.test(s)) return 'risk.summary';
-  if (/(which institution|most damage|report the most|reliability)/.test(s)) return 'institution.reliability';
-  if (/(excursion|cold chain|temperature breach)/.test(s) && /(how many|this month|count)/.test(s)) return 'coldchain.incidents';
-  if (/(route|corridor).*(fail|excursion|worst)/.test(s)) return 'route.performance';
-  if (/(pending|awaiting|approval|queue)/.test(s)) return 'order.queue';
-  if (/(trace|track|history of).*(batch|lot)/.test(s) || /batch [a-z0-9-]+/.test(s)) return 'batch.trace';
-  if (/(underserved|coverage|gap|per capita)/.test(s)) return 'coverage.gap';
-  if (/(moving fastest|consumption|most dispensed|leaderboard)/.test(s)) return 'consumption.network';
-  if (/(wastage|expiry|expired|losing stock)/.test(s)) return 'wastage.flag';
-  if (/(caused|rca|root cause).*(complaint)/.test(s) || /what caused/.test(s)) return 'complaint.rca';
+  if (/(forecast|predict|will need|next month|next week|demand|projection)/.test(s)) return 'demand.forecast';
+  if (/(risk|about to stock out|going to run out|stock out soon|likely to run out)/.test(s)) return 'risk.summary';
+  if (/(which institution|most damage|report the most|reliab|least reliable|worst institution|complaint rate)/.test(s)) return 'institution.reliability';
+  // Any cold-chain/excursion/temperature phrase is enough on its own — do not
+  // require a separate counting word ("how many"/"count"). That over-
+  // constraint sent natural phrasings like "show me cold chain incidents" to
+  // out_of_scope.
+  if (/(excursion|cold chain|coldchain|temperature breach|temp breach|temperature excursion)/.test(s)) return 'coldchain.incidents';
+  // Order-independent: "worst routes", "routes that keep failing", "corridor
+  // performance" should all match regardless of which term comes first.
+  if (/(route|corridor)/.test(s) && /(fail|excursion|worst|perform|reliab)/.test(s)) return 'route.performance';
+  if (/(pending|awaiting|approval|queue|not yet approved|waiting on)/.test(s)) return 'order.queue';
+  // "lot" alone is too common an English word ("a lot of complaints") to use
+  // as a bare trigger — only "batch" is safe unqualified. "lot" only counts
+  // when followed by something identifier-shaped: a mix of letters/digits,
+  // or at least one digit — "lot of" and "lot number" (bare) don't qualify,
+  // but "lot AB-123" and "lot 45" do.
+  const lotWithId = /\blot\s+(?:number\s+)?([a-z]*\d[a-z0-9-]*|[a-z]+-[a-z0-9-]+)\b/i.test(s);
+  if ((/(trace|track|history of|custody|provenance)/.test(s) && (/\bbatch\b/.test(s) || lotWithId)) || /\bbatch\s+[a-z0-9-]+/i.test(s) || lotWithId)
+    return 'batch.trace';
+  if (/(underserved|coverage|gap|per capita|unserved|access gap)/.test(s)) return 'coverage.gap';
+  if (/(moving fastest|consumption|most dispensed|leaderboard|top drugs|fastest moving|highest volume)/.test(s)) return 'consumption.network';
+  if (/(wastage|expir|losing stock|write.?off|spoilage)/.test(s)) return 'wastage.flag';
+  if ((/(caused|rca|root cause)/.test(s) && /(complaint)/.test(s)) || /what caused/.test(s)) return 'complaint.rca';
   return 'out_of_scope';
 }
 
@@ -250,15 +265,26 @@ async function riskSummary(): Promise<Evidence> {
   // most urgent-looking slice through the real scorer. Generous headroom
   // (80 vs the 20 returned) so an imperfect proxy still finds the true top 20.
   const RANK_CAP = 80;
-  const ranked = [...byPair.values()]
+  const byProxy = [...byPair.values()]
     .map((p) => {
       const avg = p.series.length ? p.series.reduce((a, b) => a + b, 0) / p.series.length : 0;
       const coverProxy = avg > 0 ? p.closing / avg : p.closing > 0 ? Infinity : -1; // no consumption, some stock -> not urgent; zero stock -> most urgent
       return { p, coverProxy };
     })
-    .sort((a, b) => a.coverProxy - b.coverProxy)
-    .slice(0, RANK_CAP)
-    .map((x) => x.p);
+    .sort((a, b) => a.coverProxy - b.coverProxy);
+
+  // Taking the worst 80 by cover-days alone made every scored row identical:
+  // all stocked out, all in the same outbreak districts, so all 20 returned
+  // HIGH/high-confidence and the drilldown had nothing to compare. Keep the
+  // urgent head (that IS the answer to "where are we about to stock out"), but
+  // reserve a slice for pairs further down the curve so the panel shows a real
+  // risk spectrum instead of twenty copies of the same worst case.
+  const HEAD = Math.round(RANK_CAP * 0.6);
+  const head = byProxy.slice(0, HEAD);
+  const tail = byProxy.slice(HEAD);
+  const stride = Math.max(1, Math.floor(tail.length / Math.max(1, RANK_CAP - HEAD)));
+  const spread = tail.filter((_, i) => i % stride === 0).slice(0, RANK_CAP - HEAD);
+  const ranked = [...head, ...spread].map((x) => x.p);
 
   // ─── Enrich the ranked slice with the two signals the scorer was missing ──
   // Each of these is ONE query across every pair in `ranked`, never a
@@ -353,11 +379,16 @@ async function riskSummary(): Promise<Evidence> {
     }),
   );
 
-  const atRisk = scored.filter((s) => s.score >= 0.5).sort((a, b) => b.score - a.score);
+  // A hard `score >= 0.5` cut discarded every MEDIUM and LOW row, so the panel
+  // could only ever show HIGH at high confidence — which looks broken ("100%
+  // high-confidence share") and hides the model's discrimination. Return the
+  // ranked spectrum instead, and let the UI band it.
+  const sorted = [...scored].sort((a, b) => b.score - a.score);
+  const elevated = sorted.filter((s) => s.score >= 0.5).length;
   return {
     intent: 'risk.summary',
-    summary: `${atRisk.length} institution/drug pair(s) at elevated stockout risk`,
-    data: atRisk.slice(0, 20),
+    summary: `${elevated} institution/drug pair(s) at elevated stockout risk, of ${sorted.length} scored`,
+    data: sorted.slice(0, 20),
   };
 }
 
@@ -585,13 +616,34 @@ export async function dispatch(intent: Intent, entities: Entities): Promise<Evid
     case 'wastage.flag':
       return { intent, summary: 'Not implemented yet in this phase', data: null };
     default:
-      return {
-        intent: 'out_of_scope',
-        summary:
-          'I can only answer questions about this network\'s catalogue, orders, shipments, cold chain and complaints.',
-        data: null,
-      };
+      return outOfScopeEvidence();
   }
+}
+
+/**
+ * A graceful, useful reply for an unsupported question — names what the
+ * assistant CAN answer instead of a dead end. Both the LLM prompt and the
+ * template fallback read `data.examples`, so the behaviour is identical
+ * whichever path narrates it.
+ */
+function outOfScopeEvidence(): Evidence {
+  return {
+    intent: 'out_of_scope',
+    summary:
+      "I can only answer questions about this network's catalogue, orders, shipments, cold chain and complaints",
+    data: {
+      capabilities: [
+        { topic: 'Stockout risk', example: 'Where are we about to stock out?' },
+        { topic: 'Demand forecast', example: 'What will we need next month?' },
+        { topic: 'Institution reliability', example: 'Which institutions are least reliable?' },
+        { topic: 'Cold chain', example: 'Show me cold chain incidents.' },
+        { topic: 'Order approvals', example: 'What is pending approval?' },
+        { topic: 'Consumption leaderboard', example: 'Which drugs are moving fastest?' },
+        { topic: 'Batch custody', example: 'Trace batch <lot number>.' },
+        { topic: 'Complaint root cause', example: 'What caused the recent complaints?' },
+      ],
+    },
+  };
 }
 
 /** Crude entity extraction for the keyword path. */

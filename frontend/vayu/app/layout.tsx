@@ -35,7 +35,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           .mt-kpi { cursor:default; }
           .mt-kpi:hover { background:${C.surfaceAlt}; }
           .mt-kpi:hover .mt-kpi-value { transform:translateY(-1px); }
-          .mt-domain-tab:hover { color:${C.ink}; }
+          .mt-domain-tab { transition:color .16s ${EASE_OUT}, background .16s ${EASE_OUT}; }
+          .mt-domain-tab:hover { color:${C.ink}; background:rgba(23,22,20,.03); }
           .mt-subtab:hover { border-color:${C.borderSoft}; background:${C.surfaceAlt}; }
 
           /* ─── Row / card / control micro-interactions ─── */
@@ -43,8 +44,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           .mt-row:hover { background:${C.surfaceAlt}; box-shadow:inset 2px 0 0 ${C.accent}; }
           .mt-table-zebra tbody tr:nth-child(even) { background:${C.surfaceAlt}; }
           .mt-table-zebra tbody tr:hover { background:${C.raised}; }
-          .mt-searchfield:hover { background:rgba(255,255,255,0.11); border-color:rgba(255,255,255,0.24); }
-          .mt-searchfield:focus-visible { background:rgba(255,255,255,0.11); }
+          .mt-searchfield:hover { background:rgba(255,255,255,0.11); border-color:rgba(255,255,255,0.26); box-shadow:inset 0 1px 3px rgba(0,0,0,0.24), 0 0 0 3px rgba(14,116,144,0.16); }
+          .mt-searchfield:focus-visible { background:rgba(255,255,255,0.11); border-color:rgba(14,116,144,0.55); box-shadow:inset 0 1px 3px rgba(0,0,0,0.24), 0 0 0 3px rgba(14,116,144,0.22); }
           .mt-btn { transition:transform .12s ${EASE_IN_OUT}, box-shadow .12s ${EASE_IN_OUT}, background .16s ${EASE_OUT}, border-color .16s ${EASE_OUT}, opacity .16s ${EASE_OUT}; }
           .mt-btn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 3px 8px rgba(23,22,20,.1); }
           .mt-btn:active:not(:disabled) { transform:translateY(0) scale(.98); box-shadow:none; }
@@ -80,6 +81,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           @keyframes mtRiseScale { from { opacity:0; transform:translateY(12px) scale(.985); } to { opacity:1; transform:none; } }
           @keyframes mtSweep { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
           @keyframes mtSlideIn { from { opacity:0; transform:translateX(-8px); } to { opacity:1; transform:none; } }
+          @keyframes mtRiskFlash {
+            0%   { background:rgba(185,28,28,0); box-shadow:none; }
+            18%  { background:rgba(185,28,28,.16); box-shadow:0 0 0 6px rgba(185,28,28,.10); }
+            100% { background:rgba(185,28,28,0); box-shadow:none; }
+          }
           @keyframes mtGlow { 0%,100% { opacity:.35; } 50% { opacity:.85; } }
 
           /* ─── Motion system v2 — richer entrances (see lib/theme.ts) ─── */
