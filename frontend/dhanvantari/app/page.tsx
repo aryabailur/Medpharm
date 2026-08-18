@@ -4,7 +4,7 @@
  * Store Control — institution overview.
  *
  * Every figure is computed from live dhanvantari-api responses. Nothing here
- * is hardcoded: an empty database renders <Empty>, not invented rows.
+ * is hardcoded: an empty database renders <EmptyState>, not invented rows.
  */
 
 import Link from 'next/link';
@@ -21,16 +21,18 @@ import {
   type InventoryRow,
   type LocalComplaint,
 } from '../lib/api';
-import { C, FONT, MONO, rise, rupees, stagger } from '../lib/theme';
-import { AreaSparkline, Donut } from '../components/charts';
-import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Meter, Mono, PageHeader, Pill } from '../components/ui';
-
-const LABEL_SM = {
-  font: `600 11px/1 ${FONT}`,
-  letterSpacing: '.17em',
-  textTransform: 'uppercase' as const,
-  color: C.inkFaint,
-};
+import { C, FONT, MONO, rise, rupees, VIZ, VIZ_TINT } from '../lib/theme';
+import { AreaSparkline, BarChart, ColumnChart, Donut } from '../components/charts';
+import {
+  ApiError,
+  EmptyState,
+  KpiHero,
+  LiveChip,
+  Panel,
+  PanelTitle,
+  Pill,
+  Trend,
+} from '../components/ui';
 
 export default function StoreControl() {
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
@@ -62,17 +64,6 @@ export default function StoreControl() {
       }
     })();
   }, []);
-
-  if (error) {
-    return (
-      <>
-        <PageHeader title="Store Control" />
-        <div style={{ padding: 26 }}>
-          <ApiError error={error} />
-        </div>
-      </>
-    );
-  }
 
   const stockValue = inventory.reduce((sum, r) => sum + r.qtyOnHand * (r.drug.unitPrice ?? 0), 0);
   const lowItems = inventory.filter((r) => r.lowStock);
@@ -112,7 +103,7 @@ export default function StoreControl() {
     return [
       { label: 'Critical', count: critical, color: C.red },
       { label: 'Low', count: low, color: C.amber },
-      { label: 'Expiring', count: exp, color: C.accent },
+      { label: 'Expiring', count: exp, color: VIZ.violet },
       { label: 'OK', count: ok, color: C.green },
     ].filter((s) => s.count > 0);
   }, [inventory, expiringIds]);
@@ -123,21 +114,117 @@ export default function StoreControl() {
   // as a coarse trend the chart can still draw honestly.
   const dispensedTotal = consumption.reduce((sum, r) => sum + r.dispensed, 0);
   const priorTotal = consumption.reduce((sum, r) => sum + r.prior, 0);
-  const deltaPct = priorTotal > 0 ? ((dispensedTotal - priorTotal) / priorTotal) * 100 : null;
+  const deltaPct = priorTotal > 0 ? Math.round(((dispensedTotal - priorTotal) / priorTotal) * 1000) / 10 : null;
   const sparkValues = consumption
     .slice()
     .sort((a, b) => b.dispensed - a.dispensed)
     .slice(0, 14)
     .map((r) => r.dispensed);
 
+  // Top movers — the consumption rows dispensing the most, for the dead-space
+  // fill: a ranked bar chart makes the "why" behind the trend legible.
+  const topMovers = consumption
+    .slice()
+    .sort((a, b) => b.dispensed - a.dispensed)
+    .slice(0, 6)
+    .map((r) => ({ label: r.drug, value: r.dispensed, color: VIZ.teal }));
+
+  // Stock-cover distribution — every line item bucketed by days of cover, so
+  // the dashboard shows the shape of the whole store's risk, not just the
+  // below-reorder table. Days of cover approximated the same way the table
+  // does: (on hand / reorder point) * 14.
+  const coverBuckets = useMemo(() => {
+    const buckets = { critical: 0, low: 0, ok: 0, healthy: 0 };
+    for (const r of inventory) {
+      if (r.reorderPoint <= 0) continue;
+      const days = (r.qtyOnHand / r.reorderPoint) * 14;
+      if (days <= 3) buckets.critical++;
+      else if (days <= 7) buckets.low++;
+      else if (days <= 21) buckets.ok++;
+      else buckets.healthy++;
+    }
+    return [
+      { label: '≤3D', count: buckets.critical, color: C.red },
+      { label: '4-7D', count: buckets.low, color: C.amber },
+      { label: '8-21D', count: buckets.ok, color: VIZ.teal },
+      { label: '21D+', count: buckets.healthy, color: C.green },
+    ];
+  }, [inventory]);
+
+  // Fix for defect #2: group inbound shipments so five near-identical rows
+  // never render as copy-pasted. Bucket by cold-chain state + rounded ETA
+  // instead of listing every shipment id verbatim, and show a relative time.
+  const inboundGroups = useMemo(() => {
+    const now = Date.now();
+    const map = new Map<
+      string,
+      { coldChain: boolean; etaAt: string | null; anomalyFlag: boolean; status: string; ids: string[] }
+    >();
+    for (const s of incoming) {
+      // Round ETA to the nearest 15 minutes so genuinely-close shipments group,
+      // while distinct times still separate.
+      const etaKey = s.etaAt ? Math.round(new Date(s.etaAt).getTime() / (15 * 60_000)) : 'none';
+      const key = `${s.coldChain ? 'cold' : 'amb'}|${etaKey}|${s.anomalyFlag ? 'x' : '-'}|${s.status}`;
+      if (!map.has(key)) {
+        map.set(key, { coldChain: s.coldChain, etaAt: s.etaAt, anomalyFlag: s.anomalyFlag, status: s.status, ids: [] });
+      }
+      map.get(key)!.ids.push(s.id);
+    }
+    return Array.from(map.values())
+      .map((g) => {
+        const ms = g.etaAt ? new Date(g.etaAt).getTime() - now : null;
+        let relative = '—';
+        if (ms != null) {
+          if (ms <= 0) relative = 'due now';
+          else if (ms < 3600_000) relative = `in ${Math.round(ms / 60_000)} min`;
+          else relative = `in ${Math.round(ms / 3600_000)} h`;
+        }
+        return { ...g, relative };
+      })
+      .sort((a, b) => (a.anomalyFlag === b.anomalyFlag ? 0 : a.anomalyFlag ? -1 : 1));
+  }, [incoming]);
+
   const lastReported = incoming
     .filter((s) => s.updatedAt)
     .slice()
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
 
+  if (error) {
+    return (
+      <>
+        <div style={{ padding: '20px 26px 16px', borderBottom: `1px solid ${C.border}`, background: C.surfaceAlt }}>
+          <h1 style={{ margin: 0, font: `600 18px/1.2 ${FONT}`, color: C.ink }}>Store Control</h1>
+        </div>
+        <div style={{ padding: 26 }}>
+          <ApiError error={error} />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
-      <PageHeader title="Store Control" />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: 20,
+          padding: '20px 26px 16px',
+          borderBottom: `1px solid ${C.border}`,
+          background: C.surfaceAlt,
+        }}
+      >
+        <div>
+          <h1 style={{ margin: 0, font: `600 19px/1.2 ${FONT}`, color: C.ink, letterSpacing: '-0.01em' }}>
+            Store Control
+          </h1>
+          <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 5 }}>
+            Ward-level overview · this institution
+          </div>
+        </div>
+        <LiveChip label="synced" color={VIZ.violet} />
+      </div>
 
       {excursionShipment && !ackDismissed && (
         <div style={{ background: '#FFFCF4', borderBottom: '1px solid #EEDCB4', animation: rise(0) }}>
@@ -201,242 +288,256 @@ export default function StoreControl() {
         </div>
       )}
 
-      <KpiBand columns={4}>
-        <div style={{ padding: '26px 26px 24px', borderRight: `1px solid ${C.borderFaint}`, animation: stagger(0) }}>
-          <div style={LABEL_SM}>Stock value</div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 9, marginTop: 14 }}>
-            <span style={{ font: `600 44px/1 ${MONO}`, letterSpacing: '-.04em', fontVariantNumeric: 'tabular-nums', color: C.ink }}>
-              {rupees(stockValue)}
-            </span>
-          </div>
-          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 9 }}>
-            {inventory.length} line items
-          </div>
-        </div>
-        <div style={{ padding: '26px 26px 24px', borderRight: `1px solid ${C.borderFaint}`, animation: stagger(1) }}>
-          <div style={LABEL_SM}>Below reorder point</div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 9, marginTop: 14 }}>
-            <span style={{ font: `600 44px/1 ${MONO}`, letterSpacing: '-.04em', fontVariantNumeric: 'tabular-nums', color: C.ink }}>
-              {lowItems.length}
-            </span>
-            {criticalItems.length > 0 && (
-              <span style={{ font: `500 11px/1 ${FONT}`, color: C.red, paddingBottom: 5 }}>
-                {criticalItems.length} critical
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <KpiHero
+          index={0}
+          label="Stock value"
+          value={rupees(stockValue)}
+          sub={`${inventory.length} line items`}
+          accent={VIZ.violet}
+        />
+        <KpiHero
+          index={1}
+          label="Below reorder point"
+          value={lowItems.length}
+          trend={criticalItems.length > 0 ? <Trend value={criticalItems.length} suffix=" critical" goodDirection="down" /> : undefined}
+          sub={thinnest ? `${thinnest.drug.name} thinnest` : 'No low-stock lines'}
+          accent={C.amber}
+        />
+        <KpiHero
+          index={2}
+          label="Expiring ≤ 90 days"
+          value={expiring?.items.length ?? 0}
+          // Value at risk is a standing figure, not a delta — `Trend` would
+          // prefix it with a direction arrow and a literal 0 ("→0 ₹6.1L").
+          trend={
+            expiring ? (
+              <span
+                style={{
+                  font: `600 11px/1 ${MONO}`,
+                  color: VIZ.magenta,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {rupees(expiring.valueAtRisk)} at risk
               </span>
-            )}
-          </div>
-          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 9 }}>
-            {thinnest ? `${thinnest.drug.name} thinnest` : 'No low-stock lines'}
-          </div>
-        </div>
-        <div style={{ padding: '26px 26px 24px', borderRight: `1px solid ${C.borderFaint}`, animation: stagger(2) }}>
-          <div style={LABEL_SM}>Expiring ≤ 90 days</div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 9, marginTop: 14 }}>
-            <span style={{ font: `600 44px/1 ${MONO}`, letterSpacing: '-.04em', fontVariantNumeric: 'tabular-nums', color: C.ink }}>
-              {expiring?.items.length ?? 0}
-            </span>
-            {expiring && (
-              <span style={{ font: `500 11px/1 ${FONT}`, color: C.amber, paddingBottom: 5 }}>
-                {rupees(expiring.valueAtRisk)}
-              </span>
-            )}
-          </div>
-          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 9 }}>
-            {oldestExpiring ? `${oldestExpiring.drug.name} · ${oldestExpiring.daysToExpiry}d` : 'Nothing expiring soon'}
-          </div>
-        </div>
-        <div style={{ padding: '26px 26px 24px', borderRight: `1px solid ${C.borderFaint}`, animation: stagger(3) }}>
-          <div style={LABEL_SM}>Open complaints</div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 9, marginTop: 14 }}>
-            <span style={{ font: `600 44px/1 ${MONO}`, letterSpacing: '-.04em', fontVariantNumeric: 'tabular-nums', color: C.ink }}>
-              {openComplaints.length}
-            </span>
-          </div>
-          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 9 }}>
-            {complaints.length} total filed
-          </div>
-        </div>
-      </KpiBand>
+            ) : undefined
+          }
+          sub={oldestExpiring ? `${oldestExpiring.drug.name} · ${oldestExpiring.daysToExpiry}d` : 'Nothing expiring soon'}
+          accent={VIZ.magenta}
+        />
+        <KpiHero
+          index={3}
+          label="Open complaints"
+          value={openComplaints.length}
+          sub={`${complaints.length} total filed`}
+          accent={C.red}
+        />
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) minmax(0,1fr)', gap: 24, padding: '26px 26px 52px' }}>
-        <Card style={{ animation: rise(0), overflow: 'hidden' }}>
-          <CardTitle
-            right={
-              lowItems.length > 0 ? (
-                <button
-                  style={{
-                    border: 0,
-                    background: C.ink,
-                    color: C.bg,
-                    font: `500 12px/1 ${FONT}`,
-                    padding: '8px 13px',
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Reorder all {lowItems.length}
-                </button>
-              ) : undefined
-            }
-          >
-            Below reorder point
-          </CardTitle>
-          {lowSorted.length === 0 ? (
-            <Empty>Nothing is below its reorder point.</Empty>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      font: `600 11px/1 ${FONT}`,
-                      letterSpacing: '.13em',
-                      textTransform: 'uppercase',
-                      color: C.inkSoft,
-                      padding: '14px 18px',
-                      borderBottom: `1px solid ${C.border}`,
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    Drug
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'right',
-                      font: `600 11px/1 ${FONT}`,
-                      letterSpacing: '.13em',
-                      textTransform: 'uppercase',
-                      color: C.inkSoft,
-                      padding: '14px 18px',
-                      borderBottom: `1px solid ${C.border}`,
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    On hand
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'right',
-                      font: `600 11px/1 ${FONT}`,
-                      letterSpacing: '.13em',
-                      textTransform: 'uppercase',
-                      color: C.inkSoft,
-                      padding: '14px 18px',
-                      borderBottom: `1px solid ${C.border}`,
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    Reorder pt
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      font: `600 11px/1 ${FONT}`,
-                      letterSpacing: '.13em',
-                      textTransform: 'uppercase',
-                      color: C.inkSoft,
-                      padding: '14px 18px',
-                      borderBottom: `1px solid ${C.border}`,
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    Cover
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {lowSorted.map(({ row }) => {
-                  const pct = row.reorderPoint > 0 ? (row.qtyOnHand / row.reorderPoint) * 100 : 0;
-                  const coverColor = pct < 50 ? C.red : pct < 100 ? C.amber : C.green;
-                  const days = row.reorderPoint > 0 ? Math.round((row.qtyOnHand / row.reorderPoint) * 14) : 0;
-                  return (
-                    <tr key={row.id}>
-                      <td
-                        style={{
-                          padding: '15px 18px',
-                          font: `400 14px/1.6 ${FONT}`,
-                          color: C.ink,
-                          borderBottom: `1px solid ${C.borderSoft}`,
-                          verticalAlign: 'top',
-                        }}
-                      >
-                        <div style={{ fontWeight: 500 }}>{row.drug.name}</div>
-                        <div style={{ font: `400 11px/1.4 ${MONO}`, color: C.inkFaint, marginTop: 4 }}>
-                          {row.batchRef ?? row.drug.nlemCode ?? '—'}
-                        </div>
-                      </td>
-                      <td
-                        style={{
-                          padding: '15px 18px',
-                          font: `500 14px/1.4 ${MONO}`,
-                          color: C.ink,
-                          textAlign: 'right',
-                          fontVariantNumeric: 'tabular-nums',
-                          borderBottom: `1px solid ${C.borderSoft}`,
-                          verticalAlign: 'top',
-                        }}
-                      >
-                        {row.qtyOnHand}
-                      </td>
-                      <td
-                        style={{
-                          padding: '15px 18px',
-                          font: `400 14px/1.4 ${MONO}`,
-                          color: C.inkMuted,
-                          textAlign: 'right',
-                          fontVariantNumeric: 'tabular-nums',
-                          borderBottom: `1px solid ${C.borderSoft}`,
-                          verticalAlign: 'top',
-                        }}
-                      >
-                        {row.reorderPoint}
-                      </td>
-                      <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}` }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <Meter pct={pct} color={coverColor} />
-                          <span style={{ font: `600 13px/1 ${MONO}`, color: coverColor, whiteSpace: 'nowrap' }}>
-                            {days}d
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </Card>
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <Card style={{ animation: rise(40) }}>
-            <CardTitle
+          <Panel delayMs={0} style={{ overflow: 'hidden' }}>
+            <PanelTitle
+              dot={lowItems.length > 0 ? C.amber : C.green}
               right={
-                <span style={{ font: `500 12px/1 ${MONO}`, color: C.inkFaint }}>{inventory.length} total</span>
+                lowItems.length > 0 ? (
+                  <button
+                    style={{
+                      border: 0,
+                      background: C.ink,
+                      color: C.bg,
+                      font: `500 12px/1 ${FONT}`,
+                      padding: '8px 13px',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Reorder all {lowItems.length}
+                  </button>
+                ) : undefined
               }
             >
+              Below reorder point
+            </PanelTitle>
+            {lowSorted.length === 0 ? (
+              <EmptyState title="Nothing is below its reorder point" hint="Every line item currently clears its reorder threshold." glyph="✓" tone={C.green} />
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {['Drug', 'On hand', 'Reorder pt', 'Cover'].map((h, i) => (
+                      <th
+                        key={h}
+                        style={{
+                          textAlign: i === 1 || i === 2 ? 'right' : 'left',
+                          font: `600 11px/1 ${FONT}`,
+                          letterSpacing: '.13em',
+                          textTransform: 'uppercase',
+                          color: C.inkSoft,
+                          padding: '14px 18px',
+                          borderBottom: `1px solid ${C.border}`,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lowSorted.map(({ row }) => {
+                    const pct = row.reorderPoint > 0 ? (row.qtyOnHand / row.reorderPoint) * 100 : 0;
+                    const coverColor = pct < 50 ? C.red : pct < 100 ? C.amber : C.green;
+                    const days = row.reorderPoint > 0 ? Math.round((row.qtyOnHand / row.reorderPoint) * 14) : 0;
+                    return (
+                      <tr key={row.id}>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `400 14px/1.6 ${FONT}`,
+                            color: C.ink,
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          <div style={{ fontWeight: 500 }}>{row.drug.name}</div>
+                          <div style={{ font: `400 11px/1.4 ${MONO}`, color: C.inkFaint, marginTop: 4 }}>
+                            {row.batchRef ?? row.drug.nlemCode ?? '—'}
+                          </div>
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `500 14px/1.4 ${MONO}`,
+                            color: C.ink,
+                            textAlign: 'right',
+                            fontVariantNumeric: 'tabular-nums',
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {row.qtyOnHand}
+                        </td>
+                        <td
+                          style={{
+                            padding: '15px 18px',
+                            font: `400 14px/1.4 ${MONO}`,
+                            color: C.inkMuted,
+                            textAlign: 'right',
+                            fontVariantNumeric: 'tabular-nums',
+                            borderBottom: `1px solid ${C.borderSoft}`,
+                            verticalAlign: 'top',
+                          }}
+                        >
+                          {row.reorderPoint}
+                        </td>
+                        <td style={{ padding: '15px 18px', borderBottom: `1px solid ${C.borderSoft}` }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{ width: 60, height: 6, background: C.borderSoft, borderRadius: 3, overflow: 'hidden' }}>
+                              <div
+                                style={{
+                                  width: `${Math.max(0, Math.min(100, pct))}%`,
+                                  height: 6,
+                                  background: coverColor,
+                                  borderRadius: 3,
+                                }}
+                              />
+                            </div>
+                            <span style={{ font: `600 13px/1 ${MONO}`, color: coverColor, whiteSpace: 'nowrap' }}>
+                              {days}d
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </Panel>
+
+          {/* Fills the dead space below the below-reorder table: consumption
+              trend, top movers, and stock-cover distribution, so this column
+              never ends in blank white. */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+            <Panel delayMs={40}>
+              <PanelTitle
+                right={
+                  deltaPct != null ? (
+                    <Trend value={deltaPct} suffix="%" goodDirection="none" />
+                  ) : undefined
+                }
+              >
+                Dispensing trend
+              </PanelTitle>
+              <div style={{ padding: 18 }}>
+                {sparkValues.length === 0 ? (
+                  <EmptyState title="No dispensing data yet" height={140} />
+                ) : (
+                  <AreaSparkline values={sparkValues} color={VIZ.teal} fill={VIZ_TINT.teal} />
+                )}
+              </div>
+            </Panel>
+
+            <Panel delayMs={60}>
+              <PanelTitle>Stock cover distribution</PanelTitle>
+              <div style={{ padding: 18 }}>
+                {inventory.length === 0 ? (
+                  <EmptyState title="No inventory yet" height={140} />
+                ) : (
+                  <ColumnChart bars={coverBuckets} height={110} barMax={70} />
+                )}
+              </div>
+            </Panel>
+          </div>
+
+          <Panel delayMs={80}>
+            <PanelTitle right={<span style={{ font: `500 11px/1 ${MONO}`, color: C.inkFaint }}>top {topMovers.length}</span>}>
+              Top dispensing drugs · this window
+            </PanelTitle>
+            <div style={{ padding: 18 }}>
+              {topMovers.length === 0 ? (
+                <EmptyState title="No consumption data yet" height={140} />
+              ) : (
+                <BarChart data={topMovers} />
+              )}
+            </div>
+          </Panel>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <Panel delayMs={40}>
+            <PanelTitle right={<span style={{ font: `500 12px/1 ${MONO}`, color: C.inkFaint }}>{inventory.length} total</span>}>
               Stock health
-            </CardTitle>
+            </PanelTitle>
             <div style={{ padding: '22px 20px' }}>
               {donutSegments.length === 0 ? (
-                <Empty>No inventory to summarise.</Empty>
+                <EmptyState title="No inventory to summarise" height={140} />
               ) : (
                 <Donut segments={donutSegments} totalLabel="LINES" />
               )}
             </div>
-          </Card>
+          </Panel>
 
-          <Card style={{ animation: rise(60) }}>
-            <CardTitle right={<span style={{ font: `500 11px/1 ${MONO}`, color: C.inkMuted }}>{incoming.length} shipments</span>}>
+          <Panel delayMs={60}>
+            <PanelTitle right={<span style={{ font: `500 11px/1 ${MONO}`, color: C.inkMuted }}>{incoming.length} shipments</span>}>
               Inbound today
-            </CardTitle>
-            {incoming.length === 0 ? (
-              <Empty>Nothing inbound.</Empty>
+            </PanelTitle>
+            {inboundGroups.length === 0 ? (
+              <EmptyState title="Nothing inbound" height={160} />
             ) : (
               <div>
-                {incoming.slice(0, 6).map((s) => (
+                {inboundGroups.slice(0, 6).map((g, i) => (
                   <div
-                    key={s.id}
+                    key={i}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -449,33 +550,32 @@ export default function StoreControl() {
                       style={{
                         font: `600 9px/1 ${MONO}`,
                         letterSpacing: '.06em',
-                        background: s.coldChain ? C.blueTint : C.greyTint,
-                        color: s.coldChain ? C.blue : C.grey,
+                        background: g.coldChain ? C.blueTint : C.greyTint,
+                        color: g.coldChain ? C.blue : C.grey,
                         padding: '5px 6px',
                         width: 40,
                         textAlign: 'center',
                       }}
                     >
-                      {s.coldChain ? '2–8°' : 'AMB'}
+                      {g.coldChain ? '2–8°' : 'AMB'}
                     </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ font: `500 13px/1.5 ${FONT}` }}>{s.id}</div>
+                      <div style={{ font: `500 13px/1.5 ${FONT}` }}>
+                        {g.ids.length > 1 ? `${g.ids.length} shipments` : g.ids[0]}
+                      </div>
                       <div style={{ font: `400 11px/1.4 ${MONO}`, color: C.inkFaint, marginTop: 3 }}>
-                        {s.id} · ETA{' '}
-                        {s.etaAt
-                          ? new Date(s.etaAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-                          : '—'}
+                        ETA {g.relative}
                       </div>
                     </div>
-                    <Pill label={s.anomalyFlag ? 'EXCURSION' : s.status} />
+                    <Pill label={g.anomalyFlag ? 'EXCURSION' : g.status} />
                   </div>
                 ))}
               </div>
             )}
-          </Card>
+          </Panel>
 
-          <Card style={{ animation: rise(120) }}>
-            <CardTitle
+          <Panel delayMs={100}>
+            <PanelTitle
               right={
                 deltaPct != null ? (
                   <span style={{ font: `500 11px/1 ${MONO}`, color: deltaPct >= 0 ? C.green : C.red }}>
@@ -486,10 +586,10 @@ export default function StoreControl() {
               }
             >
               Dispensing · 14 days
-            </CardTitle>
+            </PanelTitle>
             <div style={{ padding: 20 }}>
               {sparkValues.length === 0 ? (
-                <Empty>No dispensing data yet.</Empty>
+                <EmptyState title="No dispensing data yet" height={104} />
               ) : (
                 <AreaSparkline values={sparkValues} />
               )}
@@ -504,11 +604,15 @@ export default function StoreControl() {
                 }}
               >
                 <div>
-                  <div style={LABEL_SM}>Dispensed</div>
+                  <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
+                    Dispensed
+                  </div>
                   <div style={{ font: `600 21px/1 ${MONO}`, marginTop: 7 }}>{dispensedTotal.toLocaleString('en-IN')}</div>
                 </div>
                 <div>
-                  <div style={LABEL_SM}>Reported to Vayu</div>
+                  <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
+                    Reported to Vayu
+                  </div>
                   <div style={{ font: `600 21px/1 ${MONO}`, marginTop: 7 }}>
                     {lastReported
                       ? new Date(lastReported.updatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
@@ -517,7 +621,7 @@ export default function StoreControl() {
                 </div>
               </div>
             </div>
-          </Card>
+          </Panel>
         </div>
       </div>
     </>

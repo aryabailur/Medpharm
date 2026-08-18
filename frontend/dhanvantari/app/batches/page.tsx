@@ -13,15 +13,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 
 import { getIncoming, getInventory, type IncomingShipment, type InventoryRow } from '../../lib/api';
-import { C, FONT, MONO } from '../../lib/theme';
+import { C, FONT, MONO, VIZ } from '../../lib/theme';
 import {
   ApiError,
-  Card,
-  CardTitle,
-  Empty,
-  Kpi,
-  KpiBand,
+  EmptyState,
+  KpiHero,
   PageHeader,
+  Panel,
+  PanelTitle,
 } from '../../components/ui';
 import { BarChart, PieChart } from '../../components/charts';
 import BatchCatalog, { type BatchGroup } from '../../components/BatchCatalog';
@@ -156,20 +155,19 @@ export default function Batches() {
         }
       />
 
-      <KpiBand columns={4}>
-        <Kpi label="Batches received" value={loading ? '…' : totalBatches} />
-        <Kpi label="Accepted" value={loading ? '…' : accepted} deltaColor={C.green} />
-        <Kpi
-          label="Rejected"
-          value={loading ? '…' : rejected}
-          deltaColor={rejected > 0 ? C.red : C.grey}
-        />
-        <Kpi
-          label="Cold-chain shipments"
-          value={loading ? '…' : coldChainCount}
-          deltaColor={C.accent}
-        />
-      </KpiBand>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <KpiHero index={0} label="Batches received" value={loading ? '…' : totalBatches} accent={VIZ.violet} />
+        <KpiHero index={1} label="Accepted" value={loading ? '…' : accepted} accent={C.green} />
+        <KpiHero index={2} label="Rejected" value={loading ? '…' : rejected} accent={rejected > 0 ? C.red : C.grey} />
+        <KpiHero index={3} label="Cold-chain shipments" value={loading ? '…' : coldChainCount} accent={VIZ.teal} />
+      </div>
 
       <div style={{ padding: 26, display: 'grid', gap: 18 }}>
         {error && <ApiError error={error} service="dhanvantari-api" />}
@@ -177,8 +175,8 @@ export default function Batches() {
         {!loading && totalBatches > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
             {/* Acceptance pie */}
-            <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-              <CardTitle>Batch acceptance</CardTitle>
+            <Panel delayMs={0}>
+              <PanelTitle>Batch acceptance</PanelTitle>
               <div style={{ padding: 16, display: 'flex', gap: 20, alignItems: 'center' }}>
                 <PieChart data={pieData} size={130} centre={String(pieData.reduce((a, d) => a + d.value, 0))} />
                 <div style={{ display: 'grid', gap: 8 }}>
@@ -217,24 +215,24 @@ export default function Batches() {
                   )}
                 </div>
               </div>
-            </Card>
+            </Panel>
 
             {/* Shipment status bar */}
-            <Card>
-              <CardTitle>Shipments by status</CardTitle>
+            <Panel delayMs={40}>
+              <PanelTitle>Shipments by status</PanelTitle>
               <div style={{ padding: 16 }}>
                 {shipmentStatusBars.length === 0 ? (
-                  <Empty>No shipment data.</Empty>
+                  <EmptyState title="No shipment data" height={140} />
                 ) : (
                   <BarChart data={shipmentStatusBars} />
                 )}
               </div>
-            </Card>
+            </Panel>
           </div>
         )}
 
         {/* Catalogue */}
-        <Card style={{ animation: 'mtRise .55s cubic-bezier(.16,1,.3,1) both' }}>
+        <Panel delayMs={80} style={{ overflow: 'hidden' }}>
           {/* search bar */}
           <div
             style={{
@@ -291,7 +289,7 @@ export default function Batches() {
           ) : error ? null : (
             <BatchCatalog groups={groups} searchQuery={search} />
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );

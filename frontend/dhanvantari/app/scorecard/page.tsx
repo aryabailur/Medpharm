@@ -9,9 +9,9 @@
 import { useEffect, useState } from 'react';
 
 import { getScorecard, type SupplierScorecard } from '../../lib/api';
-import { C, FONT, MONO, rise } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, PageHeader } from '../../components/ui';
-import { Donut, Meter } from '../../components/charts';
+import { C, FONT, MONO, VIZ } from '../../lib/theme';
+import { ApiError, EmptyState, KpiHero, PageHeader, Panel, PanelTitle } from '../../components/ui';
+import { Donut, Meter, RadarChart } from '../../components/charts';
 
 function onTimeColor(pct: number | null): string {
   if (pct == null) return C.grey;
@@ -98,6 +98,26 @@ export default function Scorecard() {
       })()
     : [];
 
+  // Radar comparison — this supplier's four rates against an ideal-performer
+  // benchmark (100 on-time, 0 on every "bad" rate, expressed as its inverse so
+  // every axis reads "higher is better" on the same 0-100 scale).
+  const radarAxes = ['On-time', 'Acceptance', 'Cold-chain', 'Fulfilment'];
+  const radarSeries = m
+    ? [
+        {
+          name: data!.supplier.name,
+          color: VIZ.violet,
+          values: [
+            m.onTimePct ?? 0,
+            100 - (m.rejectionRatePct ?? 0),
+            100 - (m.excursionRate ?? 0),
+            100 - (m.shortfallPct ?? 0),
+          ],
+        },
+        { name: 'Ideal', color: C.borderActive, values: [100, 100, 100, 100] },
+      ]
+    : [];
+
   return (
     <>
       <PageHeader title="Supplier Scorecard" />
@@ -117,21 +137,28 @@ export default function Scorecard() {
 
       {!error && (
         <>
-          <KpiBand columns={4}>
-            <Kpi label="On-time %" value={fmtPct(m?.onTimePct)} deltaColor={onTimeColor(m?.onTimePct ?? null)} />
-            <Kpi label="Rejection %" value={fmtPct(m?.rejectionRatePct)} deltaColor={inverseColor(m?.rejectionRatePct ?? null)} />
-            <Kpi label="Excursion rate %" value={fmtPct(m?.excursionRate)} deltaColor={inverseColor(m?.excursionRate ?? null)} />
-            <Kpi label="Shortfall %" value={fmtPct(m?.shortfallPct)} deltaColor={inverseColor(m?.shortfallPct ?? null)} />
-          </KpiBand>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+              background: C.surface,
+              borderBottom: `1px solid ${C.border}`,
+            }}
+          >
+            <KpiHero index={0} label="On-time %" value={fmtPct(m?.onTimePct)} accent={onTimeColor(m?.onTimePct ?? null)} />
+            <KpiHero index={1} label="Rejection %" value={fmtPct(m?.rejectionRatePct)} accent={inverseColor(m?.rejectionRatePct ?? null)} />
+            <KpiHero index={2} label="Excursion rate %" value={fmtPct(m?.excursionRate)} accent={inverseColor(m?.excursionRate ?? null)} />
+            <KpiHero index={3} label="Shortfall %" value={fmtPct(m?.shortfallPct)} accent={inverseColor(m?.shortfallPct ?? null)} />
+          </div>
 
           <div style={{ padding: 26, display: 'grid', gap: 18 }}>
             {/* Charts row */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-              <Card style={{ animation: rise(0) }}>
-                <CardTitle>Performance breakdown</CardTitle>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18 }}>
+              <Panel delayMs={0}>
+                <PanelTitle>Performance breakdown</PanelTitle>
                 <div style={{ padding: '18px 18px 20px', display: 'grid', gap: 16 }}>
                   {rates.length === 0 ? (
-                    <Empty>No metrics yet.</Empty>
+                    <EmptyState title="No metrics yet" height={140} />
                   ) : (
                     rates.map((r) => {
                       const color =
@@ -171,13 +198,24 @@ export default function Scorecard() {
                     describe different things rather than shares of one total.
                   </div>
                 </div>
-              </Card>
+              </Panel>
 
-              <Card style={{ animation: rise(60) }}>
-                <CardTitle>Shipment outcomes</CardTitle>
+              <Panel delayMs={40}>
+                <PanelTitle>Reliability profile</PanelTitle>
+                <div style={{ padding: 18, display: 'flex', justifyContent: 'center' }}>
+                  {radarSeries.length === 0 ? (
+                    <EmptyState title="No metrics yet" height={200} />
+                  ) : (
+                    <RadarChart axes={radarAxes} series={radarSeries} size={220} />
+                  )}
+                </div>
+              </Panel>
+
+              <Panel delayMs={80}>
+                <PanelTitle>Shipment outcomes</PanelTitle>
                 <div style={{ padding: 18 }}>
                   {outcomeSlices.length === 0 ? (
-                    <Empty>No shipments observed yet.</Empty>
+                    <EmptyState title="No shipments observed yet" height={200} />
                   ) : (
                     <Donut
                       segments={outcomeSlices.map((s) => ({
@@ -189,11 +227,11 @@ export default function Scorecard() {
                     />
                   )}
                 </div>
-              </Card>
+              </Panel>
             </div>
 
-            <Card style={{ animation: rise(100) }}>
-              <CardTitle>Observation basis</CardTitle>
+            <Panel delayMs={100}>
+              <PanelTitle>Observation basis</PanelTitle>
               {b ? (
                 <div>
                   {Object.entries(b).map(([key, value]) => (
@@ -223,14 +261,14 @@ export default function Scorecard() {
                   ))}
                 </div>
               ) : (
-                <Empty>No basis data.</Empty>
+                <EmptyState title="No basis data" height={100} />
               )}
               {data?.note && (
                 <div style={{ padding: '12px 18px 16px', font: `400 12px/1.7 ${FONT}`, color: C.inkFaint }}>
                   {data.note}
                 </div>
               )}
-            </Card>
+            </Panel>
           </div>
         </>
       )}
