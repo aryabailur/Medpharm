@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
 import Nav from '../components/Nav';
-import { C, FONT } from '../lib/theme';
+import { C, EASE_IN_OUT, EASE_OUT, EASE_SPRING, FONT } from '../lib/theme';
 
 export const metadata: Metadata = {
   title: 'Dhanvantari — MedTrack',
@@ -31,10 +31,31 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 
           /* ─── Vibrant layer hover helpers — used by components/ui.tsx and Nav.tsx ─── */
           .mt-panel-hover { cursor:default; }
-          .mt-panel-hover:hover { box-shadow:0 4px 8px rgba(23,22,20,.06), 0 12px 28px rgba(23,22,20,.06); transform:translateY(-1px); border-color:${C.borderActive}; }
+          .mt-panel-hover:hover { box-shadow:0 6px 14px rgba(23,22,20,.07), 0 16px 34px rgba(23,22,20,.07); transform:translateY(-2px); border-color:${C.borderActive}; }
+          .mt-kpi { cursor:default; }
           .mt-kpi:hover { background:${C.surfaceAlt}; }
+          .mt-kpi:hover .mt-kpi-value { transform:translateY(-1px); }
           .mt-domain-tab:hover { color:${C.ink}; }
           .mt-subtab:hover { border-color:${C.borderSoft}; background:${C.surfaceAlt}; }
+
+          /* ─── Row / card / control micro-interactions ─── */
+          .mt-row { transition:background .14s ${EASE_IN_OUT}, box-shadow .14s ${EASE_IN_OUT}; }
+          .mt-row:hover { background:${C.surfaceAlt}; box-shadow:inset 2px 0 0 #6D28D9; }
+          .mt-table-zebra tbody tr:nth-child(even) { background:${C.surfaceAlt}; }
+          .mt-table-zebra tbody tr:hover { background:${C.raised}; }
+          .mt-searchfield:hover { background:rgba(255,255,255,0.11); border-color:rgba(255,255,255,0.24); }
+          .mt-searchfield:focus-visible { background:rgba(255,255,255,0.11); }
+          .mt-btn { transition:transform .12s ${EASE_IN_OUT}, box-shadow .12s ${EASE_IN_OUT}, background .16s ${EASE_OUT}, border-color .16s ${EASE_OUT}, opacity .16s ${EASE_OUT}; }
+          .mt-btn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 3px 8px rgba(23,22,20,.1); }
+          .mt-btn:active:not(:disabled) { transform:translateY(0) scale(.98); box-shadow:none; }
+          .mt-chip { transition:transform .14s ${EASE_SPRING}; }
+          .mt-chip:hover { transform:scale(1.045); }
+          .mt-icon-btn { transition:background .14s ${EASE_OUT}, color .14s ${EASE_OUT}, transform .12s ${EASE_IN_OUT}; }
+          .mt-icon-btn:hover { background:${C.raised}; color:${C.ink}; }
+          .mt-icon-btn:active { transform:scale(.92); }
+          .mt-tooltip-wrap { position:relative; }
+          .mt-tooltip { pointer-events:none; opacity:0; transform:translate(-50%,4px); transition:opacity .14s ${EASE_OUT}, transform .14s ${EASE_OUT}; }
+          .mt-tooltip-wrap:hover .mt-tooltip { opacity:1; transform:translate(-50%,0); }
 
           /* ─── Accessibility: visible focus ring everywhere, including inside the dark header ─── */
           a:focus-visible, button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
@@ -61,11 +82,23 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           @keyframes mtSlideIn { from { opacity:0; transform:translateX(-8px); } to { opacity:1; transform:none; } }
           @keyframes mtGlow { 0%,100% { opacity:.35; } 50% { opacity:.85; } }
 
+          /* ─── Motion system v2 — richer entrances (see lib/theme.ts) ─── */
+          @keyframes mtReveal { from { opacity:0; filter:blur(6px); transform:translateY(6px); } to { opacity:1; filter:blur(0); transform:none; } }
+          @keyframes mtSlideInU { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+          @keyframes mtSlideInL { from { opacity:0; transform:translateX(-14px); } to { opacity:1; transform:none; } }
+          @keyframes mtSlideInR { from { opacity:0; transform:translateX(14px); } to { opacity:1; transform:none; } }
+          @keyframes mtScaleIn { from { opacity:0; transform:scale(.92); } to { opacity:1; transform:none; } }
+          @keyframes mtRollUp { from { opacity:0; filter:blur(3px); transform:translateY(10px); } to { opacity:1; filter:blur(0); transform:none; } }
+
           @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
               animation-duration:.001ms !important;
               animation-iteration-count:1 !important;
               transition-duration:.001ms !important;
+              scroll-behavior:auto !important;
+            }
+            .mt-panel-hover:hover, .mt-btn:hover:not(:disabled), .mt-chip:hover, .mt-icon-btn:active, .mt-btn:active:not(:disabled) {
+              transform:none !important;
             }
           }
         `}</style>

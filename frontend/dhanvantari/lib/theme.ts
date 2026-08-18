@@ -271,12 +271,34 @@ export const GRAD = {
   fade: (hue: string) => `linear-gradient(180deg,${hue}28 0%,${hue}00 100%)`,
 } as const;
 
-/** Type scale. One ramp, so headings stop being hand-tuned per screen. */
+/**
+ * Type scale — display / h1 / h2 / body / caption / label.
+ *
+ * Each rung is a ready-to-spread `font` shorthand (weight/size/line-height +
+ * family) plus its own letterSpacing, so a screen stops hand-rolling font
+ * strings and every heading in the product comes from one ramp. The bare
+ * letterSpacing values (`display`, `h1`, `h2`, `body`) are kept exactly as
+ * they were so existing call sites that destructure just those four keys
+ * don't shift.
+ */
 export const TYPE = {
   display: '-.03em',
   h1: '-.02em',
   h2: '-.015em',
   body: '0',
+
+  /** 28px hero figure / page-level number. */
+  scaleDisplay: { font: `700 28px/1.15 ${FONT}`, letterSpacing: '-.03em' },
+  /** 18px screen title, as PageHeader uses. */
+  scaleH1: { font: `600 18px/1.25 ${FONT}`, letterSpacing: '-.02em' },
+  /** 13px panel/section title. */
+  scaleH2: { font: `600 13px/1.3 ${FONT}`, letterSpacing: '-.015em' },
+  /** 13px running text. */
+  scaleBody: { font: `400 13px/1.55 ${FONT}`, letterSpacing: '0' },
+  /** 12px secondary text. */
+  scaleCaption: { font: `400 12px/1.6 ${FONT}`, letterSpacing: '0' },
+  /** 11px uppercase label, matching `LABEL`. */
+  scaleLabel: { font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase' as const },
 } as const;
 
 // ─── Extra motion ────────────────────────────────────────────────────────────
@@ -300,6 +322,65 @@ export const riseScale = (delayMs = 0) =>
 
 /** Radar sweep for a map/live panel. */
 export const sweep = (durationS = 3) => `mtSweep ${durationS}s linear infinite`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MOTION SYSTEM v2 — a small named easing set, richer entrances, and a page
+// choreographer. Additive: EASE and every helper above keep working exactly
+// as before, so existing screens don't move. New screens (or new bits of
+// existing screens) reach for these instead.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Entrances — decelerate hard into place. This *is* the original `EASE`. */
+export const EASE_OUT = EASE;
+/** State changes, toggles, tab/indicator moves — smooth both ends. */
+export const EASE_IN_OUT = 'cubic-bezier(.45,0,.2,1)';
+/** Emphasis only — a small overshoot so an element feels "placed", not just
+ * stopped. Use sparingly: a KPI on first paint, a palette opening, a badge
+ * that just changed. Never on hover states someone will trigger repeatedly. */
+export const EASE_SPRING = 'cubic-bezier(.34,1.56,.64,1)';
+
+/** Blur-to-sharp reveal — reads as premium on a hero number or a panel that
+ * wants to feel like it's resolving into focus rather than just sliding in. */
+export const reveal = (delayMs = 0, durationS = 0.5) =>
+  `mtReveal ${durationS}s ${EASE_OUT} ${delayMs ? `${delayMs}ms ` : ''}both`;
+
+/** Directional slide-in. `from` picks which edge the element travels from. */
+export const slideIn = (
+  from: 'up' | 'left' | 'right' = 'up',
+  delayMs = 0,
+  durationS = 0.46,
+) => {
+  const name = from === 'left' ? 'mtSlideInL' : from === 'right' ? 'mtSlideInR' : 'mtSlideInU';
+  return `${name} ${durationS}s ${EASE_OUT} ${delayMs ? `${delayMs}ms ` : ''}both`;
+};
+
+/** Scale-in for emphasis — a modal, a just-resolved score, a hero KPI. Uses
+ * the spring curve so it settles rather than arriving flat. */
+export const scaleIn = (delayMs = 0, durationS = 0.4) =>
+  `mtScaleIn ${durationS}s ${EASE_SPRING} ${delayMs ? `${delayMs}ms ` : ''}both`;
+
+/** Number roll-up feel for a KPI figure — a touch of vertical travel and blur
+ * settling into place, distinct from the plainer `countIn`. Remount the node
+ * (change its key) to replay on a value change. */
+export const rollUp = (delayMs = 0) =>
+  `mtRollUp .5s ${EASE_SPRING} ${delayMs ? `${delayMs}ms ` : ''}both`;
+
+/**
+ * Page choreographer — turns a (section, row) pair into a stagger delay so a
+ * screen cascades top-to-bottom instead of everything appearing at once.
+ *
+ * `section` is the coarse region (header → KPI band → first panel → second
+ * panel, …); `row` is a position inside that region (a KPI cell, a table
+ * row, …). Total choreography is capped so the last element is always under
+ * ~600ms — a judge should never feel like they're waiting on a screen.
+ */
+export function choreograph(section: number, row = 0, opts?: { sectionStep?: number; rowStep?: number; base?: number; cap?: number }): number {
+  const sectionStep = opts?.sectionStep ?? 70;
+  const rowStep = opts?.rowStep ?? 40;
+  const base = opts?.base ?? 0;
+  const cap = opts?.cap ?? 560;
+  return Math.min(base + section * sectionStep + row * rowStep, cap);
+}
 
 /**
  * Container edges.

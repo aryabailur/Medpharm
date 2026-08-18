@@ -8,10 +8,23 @@
  *
  * Shared conventions, taken from the handoff and applied to every primitive:
  *   · grid rules      1px #E5E1DA, drawn under the data
- *   · axis labels     Geist Mono 10px #6B665F
- *   · data stroke     2.5px, strokeLinejoin round, revealed with mtDraw
+ *   · axis labels     Geist Mono 10–11px #6B665F, quieter than data labels
+ *   · data labels     MONO, tabular-nums, in the series/ink colour — the loud type
+ *   · data stroke     2.5–3px, strokeLinejoin round, revealed with mtDraw
  *   · end marker      8×8 square in the series colour
  *   · in-band wash    #EAF2EC behind the series, never on top
+ *   · wide coordinate space  charts that fill a wide panel use an internal
+ *     viewBox around 1000–1200 (see `TemperatureChart`, the reference), with
+ *     an optional `width`/`aspect` prop for callers in a narrower column —
+ *     never a hardcoded ~620 box that floats centred in a wide container.
+ *   · entrance motion only  mtDraw/mtGrow/mtRiseBar/mtRise/mtFade/mtPop/
+ *     mtCountIn/mtRiseScale, staggered ~40–60ms by index. No infinite loops
+ *     except an explicit live/streaming affordance. The app-level
+ *     prefers-reduced-motion block neutralises all of it globally.
+ *   · interaction        no client JS (server components) — native <title>
+ *     tooltips and scoped <style> :hover rules only.
+ *   · accessibility       every chart root gets role="img" and a descriptive
+ *     aria-label summarising the data.
  *
  * Every primitive guards empty input, a single point, and all-equal values, so
  * a zero denominator can never reach an SVG coordinate as NaN.
@@ -28,6 +41,20 @@ function safeScale(min: number, max: number) {
   const span = max - min;
   if (!Number.isFinite(span) || span === 0) return () => 0.5;
   return (v: number) => (v - min) / span;
+}
+
+/**
+ * Compact plain-count formatter — 6,172 → "6.2k", 88,000 → "88k",
+ * 1,200,000 → "1.2L" (Indian lakh notation, matching `rupees()` in theme.ts
+ * but for unit-less counts). Used for y-axis ticks so a crowded scale never
+ * wraps or overlaps.
+ */
+function compactNum(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 10000000) return `${(n / 10000000).toFixed(abs % 10000000 === 0 ? 0 : 1)}Cr`;
+  if (abs >= 100000) return `${(n / 100000).toFixed(abs % 100000 === 0 ? 0 : 1)}L`;
+  if (abs >= 1000) return `${(n / 1000).toFixed(abs % 1000 === 0 ? 0 : 1)}k`;
+  return `${Math.round(n)}`;
 }
 
 function NoData({ height = 120 }: { height?: number }) {
@@ -58,6 +85,13 @@ function Grid({ ys, x1, x2 }: { ys: number[]; x1: number; x2: number }) {
 
 /** The axis-label type style, used for every `<text>` in this file. */
 const axisText: CSSProperties = { font: `400 10px ${MONO}`, fill: C.inkSoft };
+
+/** Louder data-label type — tabular figures so a column of numbers lines up. */
+const dataText: CSSProperties = {
+  font: `600 11px ${MONO}`,
+  fill: C.ink,
+  fontVariantNumeric: 'tabular-nums',
+};
 
 /**
  * Deterministic gradient id, built from stable inputs (a caller-supplied id,
@@ -685,30 +719,37 @@ export function PieChart({
 export function AreaSparkline({
   values,
   height = 104,
+  width = 720,
   color = C.accent,
   fill = C.accentTint,
   ticks,
   gradient = false,
   gradId: gradIdProp,
+  markers,
   ariaLabel,
 }: {
   values: number[];
   height?: number;
+  /** Internal SVG coordinate width. The default suits a half-width card; a
+   *  full-bleed panel can pass something closer to 1000–1200. */
+  width?: number;
   color?: string;
   fill?: string;
   ticks?: string[];
   /** Use a top-to-bottom fade of `color` instead of the flat `fill` tint. */
   gradient?: boolean;
   gradId?: string;
+  /** Vertex dots. Defaults on for series under ~40 points. */
+  markers?: boolean;
   ariaLabel?: string;
 }) {
   if (values.length === 0) return <NoData height={height} />;
 
-  const W = 320;
-  const H = 104;
-  const padX = 4;
+  const W = width;
+  const H = height;
+  const padX = 6;
   const padT = 14;
-  const padB = 8;
+  const padB = 10;
   const innerW = W - padX * 2;
   const innerH = H - padT - padB;
 
@@ -716,11 +757,12 @@ export function AreaSparkline({
   const max = Math.max(...values);
   const scale = safeScale(min, max);
   const n = values.length;
+  const showMarkers = markers ?? n <= 40;
   const xAt = (i: number) => (n === 1 ? W / 2 : padX + (i / (n - 1)) * innerW);
   const yAt = (v: number) => padT + innerH - scale(v) * innerH;
 
   const pts = values.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`);
-  const area = [...pts, `${xAt(n - 1).toFixed(1)},${H - 8}`, `${padX},${H - 8}`];
+  const area = [...pts, `${xAt(n - 1).toFixed(1)},${padT + innerH}`, `${padX},${padT + innerH}`];
   const lastX = xAt(n - 1);
   const lastY = yAt(values[n - 1]!);
   const last = values[n - 1]!;
@@ -743,7 +785,7 @@ export function AreaSparkline({
             </linearGradient>
           </defs>
         )}
-        <Grid ys={[padT + innerH * 0.25, padT + innerH * 0.5, padT + innerH * 0.75]} x1={0} x2={W} />
+        <Grid ys={[padT + innerH * 0.25, padT + innerH * 0.5, padT + innerH * 0.75]} x1={padX} x2={W - padX} />
         <polyline
           points={area.join(' ')}
           fill={gradient ? `url(#${gid})` : fill}
@@ -751,20 +793,38 @@ export function AreaSparkline({
           style={{ animation: `mtFade .7s ease .25s both` }}
         />
         {n === 1 ? (
-          <circle cx={lastX} cy={lastY} r={3} fill={color}>
+          <circle cx={lastX} cy={lastY} r={3.5} fill={color}>
             <title>{String(last)}</title>
           </circle>
         ) : (
-          <polyline
-            points={pts.join(' ')}
-            fill="none"
-            stroke={color}
-            strokeWidth={2.5}
-            strokeLinejoin="round"
-            style={draw(0.9)}
-          />
+          <>
+            <polyline
+              points={pts.join(' ')}
+              fill="none"
+              stroke={color}
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              style={draw(0.9)}
+            />
+            {showMarkers &&
+              values.map((v, i) => (
+                <circle
+                  key={i}
+                  cx={xAt(i)}
+                  cy={yAt(v)}
+                  r={2.5}
+                  fill={C.surface}
+                  stroke={color}
+                  strokeWidth={1.5}
+                  style={{ animation: `mtFade .35s ${EASE} ${i * 12 + 200}ms both` }}
+                >
+                  <title>{String(v)}</title>
+                </circle>
+              ))}
+          </>
         )}
-        <rect x={Math.min(lastX, W - 8) - 4} y={lastY - 4} width={8} height={8} fill={color}>
+        <rect x={Math.min(lastX, W - padX - 4) - 4} y={lastY - 4} width={8} height={8} fill={color}>
           <title>{String(last)}</title>
         </rect>
       </svg>
@@ -785,10 +845,12 @@ export function ForecastChart({
   history,
   forecast,
   band,
-  height = 238,
+  height = 260,
+  width = 1120,
   yFormat = (v: number) => String(Math.round(v)),
   gradient = false,
   gradId: gradIdProp,
+  markers,
   ariaLabel,
 }: {
   history: Array<{ x: string; y: number }>;
@@ -796,22 +858,27 @@ export function ForecastChart({
   /** Upper/lower bounds aligned to `forecast`. */
   band?: Array<{ hi: number; lo: number }>;
   height?: number;
+  /** Internal SVG coordinate width. Narrow it for a caller in a tight column. */
+  width?: number;
   yFormat?: (v: number) => string;
   /** Add a top-to-bottom fade under the history line, in `C.ink`. */
   gradient?: boolean;
   gradId?: string;
+  /** Vertex dots on the history line. Defaults on under ~40 points. */
+  markers?: boolean;
   ariaLabel?: string;
 }) {
   if (history.length === 0 && forecast.length === 0) return <NoData height={height} />;
 
-  const W = 620;
-  const H = 240;
-  const padL = 46;
-  const padR = 20;
-  const padT = 30;
-  const padB = 34;
+  const W = width;
+  const H = height;
+  const padL = 58;
+  const padR = 24;
+  const padT = 34;
+  const padB = 38;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
+  const showMarkers = markers ?? history.length <= 40;
 
   const all = [
     ...history.map((p) => p.y),
@@ -897,19 +964,37 @@ export function ForecastChart({
           points={hPts.join(' ')}
           fill="none"
           stroke={C.ink}
-          strokeWidth={2.5}
+          strokeWidth={3}
           strokeLinejoin="round"
-          style={draw(0.9)}
+          strokeLinecap="round"
+          style={draw(1)}
         />
       )}
+
+      {showMarkers &&
+        history.map((p, i) => (
+          <circle
+            key={i}
+            cx={xAt(i)}
+            cy={yAt(p.y)}
+            r={3}
+            fill={C.surface}
+            stroke={C.ink}
+            strokeWidth={2}
+            style={{ animation: `mtFade .4s ${EASE} ${i * 10 + 300}ms both` }}
+          >
+            <title>{`${p.x}: ${yFormat(p.y)}`}</title>
+          </circle>
+        ))}
 
       {fJoined.length > 1 && (
         <polyline
           points={fJoined.join(' ')}
           fill="none"
           stroke={C.forecastLine}
-          strokeWidth={2.5}
-          strokeDasharray="6 5"
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeDasharray="7 6"
           style={{ animation: `mtFade .6s ease .7s both` }}
         />
       )}
@@ -925,7 +1010,7 @@ export function ForecastChart({
             strokeWidth={1}
             strokeDasharray="3 4"
           />
-          <text x={splitX + 6} y={padT + 14} style={{ font: `400 10px ${MONO}`, fill: C.forecastLine }}>
+          <text x={splitX + 8} y={padT - 12} style={{ font: `600 11px ${MONO}`, fill: C.forecastLine }}>
             FORECAST →
           </text>
         </>
@@ -934,7 +1019,7 @@ export function ForecastChart({
       <g>
         {labels.map((p, i) =>
           i % everyNth === 0 ? (
-            <text key={i} x={xAt(i)} y={H - 14} textAnchor="middle" style={axisText}>
+            <text key={i} x={xAt(i)} y={H - 16} textAnchor="middle" style={axisText}>
               {p.x}
             </text>
           ) : null,
@@ -1367,36 +1452,54 @@ export function StepRail({
 /** Several series on one shared scale, with a swatch legend above. */
 export function MultiLineChart({
   series,
-  height = 200,
+  height = 220,
+  width = 1160,
   yUnit = '',
+  markers,
+  annotation,
+  ariaLabel,
 }: {
   series: Array<{ name: string; color: string; points: Array<{ x: string; y: number }> }>;
   height?: number;
+  /** Internal SVG coordinate width. Narrow it for a caller in a tight column. */
+  width?: number;
   /** Suffix appended to each y-axis tick, e.g. '%' or ' units'. */
   yUnit?: string;
+  /** Vertex dots. Defaults on when the longest series has under ~40 points. */
+  markers?: boolean;
+  /** Optional horizontal reference line — a target, a benchmark, a threshold. */
+  annotation?: { y: number; label: string; color?: string };
+  ariaLabel?: string;
 }) {
   const nonEmpty = series.filter((s) => s.points.length > 0);
   if (nonEmpty.length === 0) return <NoData height={height} />;
 
-  const W = 620;
-  const H = 200;
-  const padL = 46;
-  const padR = 20;
-  const padT = 20;
-  const padB = 30;
+  const W = width;
+  const H = height;
+  const padL = 64;
+  const padR = 24;
+  const padT = 24;
+  const padB = 34;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
   const all = nonEmpty.flatMap((s) => s.points.map((p) => p.y));
+  const maxN = Math.max(...nonEmpty.map((s) => s.points.length));
+  const showMarkers = markers ?? maxN <= 40;
   const max = Math.max(...all, 0);
   const scale = safeScale(0, max * 1.08 || 1);
   const yAt = (v: number) => padT + innerH - scale(v) * innerH;
 
-  const maxN = Math.max(...nonEmpty.map((s) => s.points.length));
   const xAt = (i: number) => (maxN === 1 ? padL + innerW / 2 : padL + (i / (maxN - 1)) * innerW);
 
   const ticks = nonEmpty.reduce((a, b) => (b.points.length > a.points.length ? b : a)).points;
-  const everyNth = tickStep(ticks.length, 8);
+  const everyNth = tickStep(ticks.length, 10);
+  const fmtTick = (v: number) => `${compactNum(v)}${yUnit}`;
+  const label =
+    ariaLabel ??
+    nonEmpty
+      .map((s) => `${s.name}, latest ${s.points[s.points.length - 1]!.y}${yUnit}`)
+      .join('; ');
 
   return (
     <div>
@@ -1407,7 +1510,7 @@ export function MultiLineChart({
         viewBox={`0 0 ${W} ${H}`}
         style={{ width: '100%', height, display: 'block' }}
         role="img"
-        aria-label={nonEmpty.map((s) => s.name).join(', ')}
+        aria-label={label}
       >
         <Grid
           ys={[0, 0.25, 0.5, 0.75, 1].map((f) => padT + innerH * f)}
@@ -1415,36 +1518,75 @@ export function MultiLineChart({
           x2={W - padR}
         />
         <g>
-          {[1, 0.5, 0].map((f) => (
-            <text key={f} x={8} y={padT + innerH * (1 - f) + 4} style={axisText}>
-              {Math.round(max * 1.08 * f).toLocaleString('en-IN')}
-              {yUnit}
+          {[1, 0.75, 0.5, 0.25, 0].map((f) => (
+            <text key={f} x={12} y={padT + innerH * (1 - f) + 4} style={axisText}>
+              {fmtTick(max * 1.08 * f)}
             </text>
           ))}
         </g>
+
+        {annotation && (
+          <g>
+            <line
+              x1={padL}
+              x2={W - padR}
+              y1={yAt(annotation.y)}
+              y2={yAt(annotation.y)}
+              stroke={annotation.color ?? C.inkGhost}
+              strokeWidth={1.5}
+              strokeDasharray="5 4"
+            />
+            <text
+              x={W - padR - 4}
+              y={yAt(annotation.y) - 6}
+              textAnchor="end"
+              style={{ font: `500 10px ${MONO}`, fill: annotation.color ?? C.inkMuted }}
+            >
+              {annotation.label}
+            </text>
+          </g>
+        )}
+
         {nonEmpty.map((s, si) =>
           s.points.length === 1 ? (
-            <circle key={s.name} cx={xAt(0)} cy={yAt(s.points[0]!.y)} r={3.5} fill={s.color}>
+            <circle key={s.name} cx={xAt(0)} cy={yAt(s.points[0]!.y)} r={4.5} fill={s.color}>
               <title>{`${s.name}: ${s.points[0]!.y}`}</title>
             </circle>
           ) : (
-            <polyline
-              key={s.name}
-              points={s.points.map((p, i) => `${xAt(i)},${yAt(p.y)}`).join(' ')}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={2.5}
-              strokeLinejoin="round"
-              style={draw(0.9, si * 120)}
-            >
-              <title>{s.name}</title>
-            </polyline>
+            <g key={s.name}>
+              <polyline
+                points={s.points.map((p, i) => `${xAt(i)},${yAt(p.y)}`).join(' ')}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={3}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                style={draw(1, si * 120)}
+              >
+                <title>{s.name}</title>
+              </polyline>
+              {showMarkers &&
+                s.points.map((p, i) => (
+                  <circle
+                    key={i}
+                    cx={xAt(i)}
+                    cy={yAt(p.y)}
+                    r={3}
+                    fill={C.surface}
+                    stroke={s.color}
+                    strokeWidth={2}
+                    style={{ animation: `mtFade .4s ${EASE} ${si * 120 + i * 12 + 200}ms both` }}
+                  >
+                    <title>{`${s.name} · ${p.x}: ${p.y}${yUnit}`}</title>
+                  </circle>
+                ))}
+            </g>
           ),
         )}
         <g>
           {ticks.map((p, i) =>
             i % everyNth === 0 ? (
-              <text key={i} x={xAt(i)} y={H - 10} textAnchor="middle" style={axisText}>
+              <text key={i} x={xAt(i)} y={H - 12} textAnchor="middle" style={axisText}>
                 {p.x}
               </text>
             ) : null,
@@ -1457,26 +1599,37 @@ export function MultiLineChart({
 
 // ─── ScatterPlot ─────────────────────────────────────────────────────────────
 
-/** Two-axis scatter with labelled points and real axis rules. */
+/**
+ * Two-axis scatter with labelled points and real axis rules.
+ *
+ * Point labels use greedy collision avoidance: each candidate label is tested
+ * against every label already placed, and dropped (not overlapped) if it
+ * would collide — a crowded cluster stays legible instead of a smear of text.
+ */
 export function ScatterPlot({
   points,
   xLabel,
   yLabel,
-  height = 260,
+  height = 320,
+  width = 1120,
+  ariaLabel,
 }: {
   points: Array<{ x: number; y: number; label: string; color?: string }>;
   xLabel?: string;
   yLabel?: string;
   height?: number;
+  /** Internal SVG coordinate width. Narrow it for a caller in a tight column. */
+  width?: number;
+  ariaLabel?: string;
 }) {
   if (points.length === 0) return <NoData height={height} />;
 
-  const W = 620;
-  const H = 260;
-  const padL = 52;
-  const padR = 28;
-  const padT = 20;
-  const padB = 42;
+  const W = width;
+  const H = height;
+  const padL = yLabel ? 76 : 56;
+  const padR = 32;
+  const padT = 24;
+  const padB = xLabel ? 56 : 40;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
@@ -1491,18 +1644,38 @@ export function ScatterPlot({
   const xAt = (v: number) => padL + sx(v) * innerW;
   const yAt = (v: number) => padT + innerH - sy(v) * innerH;
 
+  // Greedy label-collision avoidance: place widest/lowest-index labels first
+  // in data order, keep a running list of placed boxes, and skip any
+  // candidate that overlaps one already kept.
+  const labelW = (s: string) => s.length * 5.6 + 8;
+  const labelH = 13;
+  const placed: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+  const shownLabel = points.map((p) => {
+    const lx = xAt(p.x) + 9;
+    const ly = yAt(p.y) + 4;
+    const box = { x1: lx, y1: ly - labelH, x2: lx + labelW(p.label), y2: ly + 2 };
+    const overlaps = placed.some(
+      (b) => box.x1 < b.x2 && box.x2 > b.x1 && box.y1 < b.y2 && box.y2 > b.y1,
+    );
+    if (overlaps) return false;
+    placed.push(box);
+    return true;
+  });
+
+  const label =
+    ariaLabel ??
+    `Scatter of ${points.length} points${xLabel ? `, ${xLabel}` : ''}${yLabel ? ` vs ${yLabel}` : ''}`;
+
+  const yTickFracs = [0, 0.25, 0.5, 0.75, 1];
+
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
       style={{ width: '100%', height, display: 'block' }}
       role="img"
-      aria-label={`Scatter of ${points.length} points${xLabel ? `, ${xLabel}` : ''}${yLabel ? ` vs ${yLabel}` : ''}`}
+      aria-label={label}
     >
-      <Grid
-        ys={[0, 0.25, 0.5, 0.75, 1].map((f) => padT + innerH * f)}
-        x1={padL}
-        x2={W - padR}
-      />
+      <Grid ys={yTickFracs.map((f) => padT + innerH * f)} x1={padL} x2={W - padR} />
       <line x1={padL} x2={padL} y1={padT} y2={padT + innerH} stroke={C.border} strokeWidth={1} />
       <line
         x1={padL}
@@ -1513,25 +1686,26 @@ export function ScatterPlot({
         strokeWidth={1}
       />
 
-      <text x={padL} y={padT + innerH + 18} style={axisText}>
+      <text x={padL} y={padT + innerH + 20} style={axisText}>
         {xMin.toFixed(1)}
       </text>
-      <text x={padL + innerW} y={padT + innerH + 18} textAnchor="end" style={axisText}>
+      <text x={padL + innerW} y={padT + innerH + 20} textAnchor="end" style={axisText}>
         {xMax.toFixed(1)}
       </text>
-      <text x={12} y={padT + 6} style={axisText}>
-        {yMax.toFixed(0)}
-      </text>
-      <text x={12} y={padT + innerH} style={axisText}>
-        {yMin.toFixed(0)}
-      </text>
+      <g>
+        {yTickFracs.map((f) => (
+          <text key={f} x={padL - 10} y={padT + innerH * (1 - f) + 4} textAnchor="end" style={axisText}>
+            {(yMin + (yMax - yMin) * f).toFixed(0)}
+          </text>
+        ))}
+      </g>
 
       {xLabel && (
         <text
           x={padL + innerW / 2}
-          y={H - 8}
+          y={H - 14}
           textAnchor="middle"
-          style={{ font: `500 10px ${FONT}`, fill: C.inkFaint }}
+          style={{ font: `600 11px ${FONT}`, fill: C.inkFaint, letterSpacing: '.03em' }}
         >
           {xLabel}
         </text>
@@ -1539,29 +1713,25 @@ export function ScatterPlot({
       {yLabel && (
         <text
           x={-(padT + innerH / 2)}
-          y={14}
+          y={20}
           textAnchor="middle"
           transform="rotate(-90)"
-          style={{ font: `500 10px ${FONT}`, fill: C.inkFaint }}
+          style={{ font: `600 11px ${FONT}`, fill: C.inkFaint, letterSpacing: '.03em' }}
         >
           {yLabel}
         </text>
       )}
 
       {points.map((p, i) => (
-        <g key={i} style={{ animation: `mtFade .5s ease ${i * 60}ms both` }}>
-          <rect
-            x={xAt(p.x) - 4}
-            y={yAt(p.y) - 4}
-            width={8}
-            height={8}
-            fill={p.color ?? C.accent}
-          >
+        <g key={i} style={{ animation: `mtPop .5s ${EASE} ${i * 40}ms both` }}>
+          <circle cx={xAt(p.x)} cy={yAt(p.y)} r={5.5} fill={p.color ?? C.accent} stroke={C.surface} strokeWidth={1.5}>
             <title>{`${p.label}: (${p.x}, ${p.y})`}</title>
-          </rect>
-          <text x={xAt(p.x) + 9} y={yAt(p.y) + 4} style={{ font: `400 10px ${MONO}`, fill: C.inkMuted }}>
-            {p.label}
-          </text>
+          </circle>
+          {shownLabel[i] && (
+            <text x={xAt(p.x) + 9} y={yAt(p.y) + 4} style={{ font: `500 10px ${MONO}`, fill: C.inkMuted }}>
+              {p.label}
+            </text>
+          )}
         </g>
       ))}
     </svg>
@@ -1737,13 +1907,23 @@ export function StackedBarChart({
 
 /**
  * Side-by-side comparison bars — requested vs approved quantity, planned vs
- * actual, this-period vs last-period — grouped per category with a legend.
+ * actual, this-period vs last-period, on-time % vs rejection % — grouped per
+ * category with a legend.
+ *
+ * Two series of very different magnitude (a ~90% on-time rate next to a ~4%
+ * rejection rate) is the case this component must not fail at: a shared
+ * linear scale would draw the small series as an invisible sliver at the
+ * baseline. Every bar therefore gets a minimum visible height (a few px of
+ * the plot, never truly zero unless the value itself is zero) and its own
+ * value label directly above it, so the reader compares printed numbers, not
+ * just bar heights, whenever the visual comparison alone would mislead.
  */
 export function GroupedBarChart({
   data,
   seriesNames,
   colors = SERIES,
-  height = 200,
+  height = 220,
+  width = 1120,
   valueFormat = (v: number) => v.toLocaleString('en-IN'),
   ariaLabel,
 }: {
@@ -1751,13 +1931,34 @@ export function GroupedBarChart({
   seriesNames: string[];
   colors?: readonly string[];
   height?: number;
+  /** Internal SVG coordinate width. Narrow it for a caller in a tight column. */
+  width?: number;
   valueFormat?: (v: number) => string;
   ariaLabel?: string;
 }) {
   if (data.length === 0 || seriesNames.length === 0) return <NoData height={height} />;
 
+  const W = width;
+  const H = height;
+  const padL = 56;
+  const padR = 20;
+  const padT = 28;
+  const padB = 38;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+
   const max = Math.max(...data.flatMap((d) => d.values.map((v) => v || 0)), 0) || 1;
-  const barMax = height - 46;
+  const yAt = (v: number) => padT + innerH - (Math.max(0, v) / max) * innerH;
+  const MIN_H = 4; // floor so a small-but-nonzero value never reads as absent
+
+  const n = data.length;
+  const groupGap = 28;
+  const groupW = (innerW - groupGap * (n - 1)) / n;
+  const barGap = 4;
+  const nSeries = seriesNames.length;
+  const barW = Math.max(3, (groupW - barGap * (nSeries - 1)) / nSeries);
+
+  const gridFracs = [0, 0.25, 0.5, 0.75, 1];
 
   return (
     <div>
@@ -1765,54 +1966,70 @@ export function GroupedBarChart({
         <Legend items={seriesNames.map((name, i) => ({ label: name, color: colors[i % colors.length]! }))} />
       </div>
       <style>{`.mt-grp-bar { transition: filter .15s ${EASE}; } .mt-grp-bar:hover { filter: brightness(1.08); }`}</style>
-      <div
-        style={{ display: 'flex', alignItems: 'flex-end', gap: 20, height }}
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: '100%', height, display: 'block' }}
         role="img"
-        aria-label={ariaLabel ?? data.map((d) => `${d.label}: ${d.values.join('/')}`).join(', ')}
+        aria-label={
+          ariaLabel ??
+          data
+            .map((d) => `${d.label}: ${d.values.map((v, i) => `${seriesNames[i] ?? `series ${i + 1}`} ${valueFormat(v || 0)}`).join(', ')}`)
+            .join('; ')
+        }
       >
-        {data.map((d, di) => (
-          <div
-            key={d.label}
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 8,
-              height: '100%',
-              justifyContent: 'flex-end',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: barMax, width: '100%' }}>
-              {d.values.map((v, si) => (
-                <div
-                  key={si}
-                  className="mt-grp-bar"
-                  title={`${seriesNames[si] ?? `Series ${si + 1}`}: ${valueFormat(v || 0)}`}
-                  style={{
-                    flex: 1,
-                    height: Math.max(1, Math.round(((v || 0) / max) * barMax)),
-                    background: colors[si % colors.length],
-                    borderRadius: '2px 2px 0 0',
-                    transformOrigin: 'bottom',
-                    animation: `mtRiseBar .6s ${EASE} ${di * 70 + si * 40}ms both`,
-                  }}
-                />
-              ))}
-            </div>
-            <span
-              style={{
-                font: `500 9px/1 ${MONO}`,
-                letterSpacing: '.08em',
-                color: C.inkFaint,
-                textAlign: 'center',
-              }}
-            >
-              {d.label}
-            </span>
-          </div>
-        ))}
-      </div>
+        <Grid ys={gridFracs.map((f) => padT + innerH * f)} x1={padL} x2={W - padR} />
+        <g>
+          {gridFracs.map((f, i) => (
+            <text key={i} x={padL - 10} y={padT + innerH * (1 - f) + 4} textAnchor="end" style={axisText}>
+              {compactNum(max * f)}
+            </text>
+          ))}
+        </g>
+
+        {data.map((d, di) => {
+          const gx = padL + di * (groupW + groupGap);
+          return (
+            <g key={d.label}>
+              {d.values.map((raw, si) => {
+                const v = raw || 0;
+                const barTop = v > 0 ? Math.min(yAt(v), yAt(0) - MIN_H) : yAt(0);
+                const h = Math.max(v > 0 ? MIN_H : 0, yAt(0) - barTop);
+                const bx = gx + si * (barW + barGap);
+                return (
+                  <g key={si}>
+                    <rect
+                      className="mt-grp-bar"
+                      x={bx}
+                      y={yAt(0) - h}
+                      width={barW}
+                      height={h}
+                      fill={colors[si % colors.length]}
+                      rx={2}
+                      style={{
+                        transformOrigin: `${(bx + barW / 2).toFixed(1)}px ${yAt(0).toFixed(1)}px`,
+                        animation: `mtRiseBar .6s ${EASE} ${di * 70 + si * 40}ms both`,
+                      }}
+                    >
+                      <title>{`${d.label} · ${seriesNames[si] ?? `Series ${si + 1}`}: ${valueFormat(v)}`}</title>
+                    </rect>
+                    <text
+                      x={bx + barW / 2}
+                      y={yAt(0) - h - 6}
+                      textAnchor="middle"
+                      style={{ ...dataText, font: `600 10px ${MONO}`, fill: colors[si % colors.length] }}
+                    >
+                      {valueFormat(v)}
+                    </text>
+                  </g>
+                );
+              })}
+              <text x={gx + groupW / 2} y={H - 14} textAnchor="middle" style={axisText}>
+                {d.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
@@ -2158,21 +2375,24 @@ export interface WaterfallStep {
 
 export function WaterfallChart({
   steps,
-  height = 220,
+  height = 240,
+  width = 1120,
   valueFormat = (v: number) => v.toLocaleString('en-IN'),
 }: {
   steps: WaterfallStep[];
   height?: number;
+  /** Internal SVG coordinate width. Narrow it for a caller in a tight column. */
+  width?: number;
   valueFormat?: (v: number) => string;
 }) {
   if (steps.length === 0) return <NoData height={height} />;
 
-  const W = 640;
+  const W = width;
   const H = height;
-  const padL = 50;
-  const padR = 16;
-  const padT = 24;
-  const padB = 34;
+  const padL = 68;
+  const padR = 20;
+  const padT = 28;
+  const padB = 36;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
@@ -2192,8 +2412,11 @@ export function WaterfallChart({
   const zeroY = yAt(0);
 
   const n = bars.length;
-  const gap = 10;
-  const barW = (innerW - gap * (n - 1)) / n;
+  const gap = Math.min(18, Math.max(6, innerW / n / 4));
+  const barW = Math.max(2, (innerW - gap * (n - 1)) / n);
+  const gridTop = Math.max(0, max);
+  const gridBottom = Math.min(0, min);
+  const gridFracs = [0, 0.5, 1];
 
   return (
     <svg
@@ -2202,7 +2425,14 @@ export function WaterfallChart({
       role="img"
       aria-label={`Waterfall: ${bars.map((b) => `${b.label} ${b.isTotal ? b.value : (b.value >= 0 ? '+' : '') + b.value}`).join(', ')}`}
     >
-      <Grid ys={[padT, zeroY, padT + innerH].filter((y, i, a) => a.indexOf(y) === i)} x1={padL} x2={W - padR} />
+      <Grid ys={gridFracs.map((f) => padT + innerH * f)} x1={padL} x2={W - padR} />
+      <g>
+        {gridFracs.map((f, i) => (
+          <text key={i} x={padL - 10} y={padT + innerH * f + 4} textAnchor="end" style={axisText}>
+            {compactNum(gridTop - (gridTop - gridBottom) * f)}
+          </text>
+        ))}
+      </g>
       <line
         x1={padL}
         x2={W - padR}
@@ -2244,13 +2474,13 @@ export function WaterfallChart({
             </rect>
             <text
               x={x + barW / 2}
-              y={y - 6}
+              y={y - 8}
               textAnchor="middle"
-              style={{ font: `600 10px ${MONO}`, fill: color }}
+              style={{ ...dataText, fill: color }}
             >
               {b.isTotal ? valueFormat(b.value) : `${b.value >= 0 ? '+' : ''}${valueFormat(b.value)}`}
             </text>
-            <text x={x + barW / 2} y={H - 12} textAnchor="middle" style={axisText}>
+            <text x={x + barW / 2} y={H - 14} textAnchor="middle" style={axisText}>
               {b.label}
             </text>
           </g>
@@ -2270,23 +2500,28 @@ export function WaterfallChart({
 export function TimelineBars({
   rows,
   height,
+  width = 1120,
   rowH = 28,
   labelWidth = 120,
+  ariaLabel,
 }: {
   rows: Array<{
     label: string;
     spans: Array<{ from: number; to: number; color: string; note?: string }>;
   }>;
   height?: number;
+  /** Internal SVG coordinate width. Narrow it for a caller in a tight column. */
+  width?: number;
   rowH?: number;
   labelWidth?: number;
+  ariaLabel?: string;
 }) {
   if (rows.length === 0) return <NoData height={height ?? 120} />;
 
-  const W = 640;
+  const W = width;
   const H = height ?? rows.length * (rowH + 8) + 16;
   const padL = labelWidth;
-  const padR = 12;
+  const padR = 16;
   const innerW = W - padL - padR;
 
   return (
@@ -2294,7 +2529,7 @@ export function TimelineBars({
       viewBox={`0 0 ${W} ${H}`}
       style={{ width: '100%', height: H, display: 'block' }}
       role="img"
-      aria-label={`Timeline of ${rows.length} rows`}
+      aria-label={ariaLabel ?? `Timeline of ${rows.length} rows`}
     >
       <line x1={padL} x2={W - padR} y1={8} y2={8} stroke={C.borderFaint} strokeWidth={1} />
       {rows.map((row, ri) => {

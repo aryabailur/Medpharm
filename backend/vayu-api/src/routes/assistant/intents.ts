@@ -172,6 +172,30 @@ async function institutionReliability(): Promise<Evidence> {
   };
 }
 
+/** How recent a month must be to count toward the district disease signal. */
+const DISEASE_LOOKBACK_MONTHS = 3;
+
+/**
+ * One district's derived 0..1 disease signal.
+ *
+ * Blends the latest month's outbreak flag (binary, high weight when true)
+ * with the normalised trend-vs-3-month-average, so a district that is both
+ * flagged AND trending up scores higher than either alone. Districts with no
+ * rows genuinely have no signal — this returns 0, never a guess.
+ */
+function deriveDiseaseSignal(rows: Array<{ month: Date; outbreakFlag: boolean; trendPctVs3mAvg: number | null }>): number {
+  if (rows.length === 0) return 0;
+  const latestMonth = rows.reduce((max, r) => (r.month > max ? r.month : max), rows[0]!.month);
+  const latest = rows.filter((r) => r.month.getTime() === latestMonth.getTime());
+  const outbreakNow = latest.some((r) => r.outbreakFlag);
+  // trendPctVs3mAvg is a percentage (e.g. 40 for +40%); normalise to 0..1
+  // over a 0-100% band and clamp — a huge spike shouldn't exceed 1.
+  const trends = latest.map((r) => r.trendPctVs3mAvg ?? 0).filter((n) => Number.isFinite(n));
+  const trend = trends.length ? Math.max(...trends) / 100 : 0;
+  const trendSignal = Math.max(0, Math.min(1, trend));
+  return Math.max(0, Math.min(1, (outbreakNow ? 0.6 : 0) + trendSignal * 0.4));
+}
+
 /** M3 — network risk summary, scored via Nidana with a TS fallback. */
 async function riskSummary(): Promise<Evidence> {
   // Reads StockLedger, not ConsumptionFeed. The MedTrack dataset (§10) loads
@@ -184,17 +208,30 @@ async function riskSummary(): Promise<Evidence> {
     orderBy: { month: 'desc' },
     take: 1200,
     include: {
-      institution: { select: { id: true, name: true, district: true } },
+      institution: { select: { id: true, name: true, district: true, districtId: true } },
       drug: { select: { id: true, name: true } },
     },
   });
 
-  const byPair = new Map<string, { institution: string; district: string | null; drug: string; institutionId: string; drugId: string; series: number[]; closing: number }>();
+  const byPair = new Map<
+    string,
+    {
+      institution: string;
+      district: string | null;
+      districtId: string | null;
+      drug: string;
+      institutionId: string;
+      drugId: string;
+      series: number[];
+      closing: number;
+    }
+  >();
   for (const f of feeds) {
     const key = `${f.institutionId}:${f.drugId}`;
     const cur = byPair.get(key) ?? {
       institution: f.institution.name,
       district: f.institution.district,
+      districtId: f.institution.districtId,
       drug: f.drug.name,
       institutionId: f.institutionId,
       drugId: f.drugId,
@@ -223,14 +260,94 @@ async function riskSummary(): Promise<Evidence> {
     .slice(0, RANK_CAP)
     .map((x) => x.p);
 
+  // ─── Enrich the ranked slice with the two signals the scorer was missing ──
+  // Each of these is ONE query across every pair in `ranked`, never a
+  // per-pair round trip — that's what kept this endpoint under 3s before,
+  // and adding real signals must not regress it.
+
+  const institutionIds = [...new Set(ranked.map((p) => p.institutionId))];
+  const drugIds = [...new Set(ranked.map((p) => p.drugId))];
+  const districtIds = [...new Set(ranked.map((p) => p.districtId).filter((d): d is string => !!d))];
+
+  // 1. Latest on-hand snapshot. CurrentStock is refreshed more recently than
+  //    the ledger's closingStock, which can be months stale for pairs at the
+  //    top of the ranking (that staleness is exactly why cover_days was
+  //    collapsing to 0). Fall back to ledger closing stock when a pair has
+  //    no CurrentStock row.
+  const currentStockRows = await prisma.currentStock.findMany({
+    where: { institutionId: { in: institutionIds }, drugId: { in: drugIds } },
+    select: { institutionId: true, drugId: true, quantityOnHand: true },
+  });
+  const qtyOnHandByPair = new Map<string, number>();
+  for (const r of currentStockRows) {
+    qtyOnHandByPair.set(`${r.institutionId}:${r.drugId}`, r.quantityOnHand);
+  }
+
+  // 2. District disease signal — one grouped fetch across all districts in
+  //    scope, most recent months only.
+  const diseaseSince = new Date();
+  diseaseSince.setMonth(diseaseSince.getMonth() - DISEASE_LOOKBACK_MONTHS);
+  const diseaseRows = districtIds.length
+    ? await prisma.diseaseSignal.findMany({
+        where: { districtId: { in: districtIds }, month: { gte: diseaseSince } },
+        select: { districtId: true, month: true, outbreakFlag: true, trendPctVs3mAvg: true },
+      })
+    : [];
+  const diseaseByDistrict = new Map<string, Array<{ month: Date; outbreakFlag: boolean; trendPctVs3mAvg: number | null }>>();
+  for (const r of diseaseRows) {
+    const arr = diseaseByDistrict.get(r.districtId) ?? [];
+    arr.push({ month: r.month, outbreakFlag: r.outbreakFlag, trendPctVs3mAvg: r.trendPctVs3mAvg });
+    diseaseByDistrict.set(r.districtId, arr);
+  }
+  const diseaseSignalByDistrict = new Map<string, number>();
+  for (const [districtId, rows] of diseaseByDistrict) {
+    diseaseSignalByDistrict.set(districtId, deriveDiseaseSignal(rows));
+  }
+
+  // 3. Open excursions / late shipments per institution — one shipment fetch
+  //    (with its excursions) across all institutions in scope.
+  const now = new Date();
+  const shipmentRows = await prisma.shipment.findMany({
+    where: { supplyOrder: { institutionId: { in: institutionIds } } },
+    select: {
+      supplyOrder: { select: { institutionId: true } },
+      etaAt: true,
+      deliveredAt: true,
+      excursions: { select: { endedAt: true } },
+    },
+  });
+  const excursionsByInstitution = new Map<string, number>();
+  const lateShipmentsByInstitution = new Map<string, number>();
+  for (const s of shipmentRows) {
+    const institutionId = s.supplyOrder?.institutionId;
+    if (!institutionId) continue;
+    const openExcursions = s.excursions.filter((e) => e.endedAt == null).length;
+    if (openExcursions > 0) {
+      excursionsByInstitution.set(institutionId, (excursionsByInstitution.get(institutionId) ?? 0) + openExcursions);
+    }
+    // Late = delivered after its ETA, or still undelivered past its ETA.
+    const isLate = s.etaAt != null && (s.deliveredAt ? s.deliveredAt > s.etaAt : now > s.etaAt);
+    if (isLate) {
+      lateShipmentsByInstitution.set(institutionId, (lateShipmentsByInstitution.get(institutionId) ?? 0) + 1);
+    }
+  }
+
   const scored = await Promise.all(
     ranked.map(async (p) => {
+      const pairKey = `${p.institutionId}:${p.drugId}`;
+      const avgConsumption = p.series.length ? p.series.reduce((a, b) => a + b, 0) / p.series.length : 0;
+      const qtyOnHand = qtyOnHandByPair.get(pairKey) ?? p.closing;
+      const diseaseSignal = p.districtId ? diseaseSignalByDistrict.get(p.districtId) ?? 0 : 0;
+
       const r = await risk({
         institutionId: p.institutionId,
         drugId: p.drugId,
-        qtyOnHand: p.closing,
-        reorderPoint: Math.round((p.series.reduce((a, b) => a + b, 0) / (p.series.length || 1)) * 0.5),
+        qtyOnHand,
+        reorderPoint: Math.round(avgConsumption * 0.5),
         recentConsumption: p.series.slice(0, 6).reverse(),
+        diseaseSignal,
+        openExcursions: excursionsByInstitution.get(p.institutionId) ?? 0,
+        lateShipments: lateShipmentsByInstitution.get(p.institutionId) ?? 0,
       });
       return { institution: p.institution, district: p.district, drug: p.drug, score: r.score, band: r.band, confidence: r.confidence, signals: r.signals, source: r.source };
     }),
