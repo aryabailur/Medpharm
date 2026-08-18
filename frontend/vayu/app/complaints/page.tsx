@@ -15,8 +15,20 @@ import {
   type RcaInsights,
   type RcaSummary,
 } from '../../lib/api';
-import { C, FONT, MONO, rise, statusColors } from '../../lib/theme';
-import { ApiError, Button, Card, CardTitle, Empty, Kpi, KpiBand, PageHeader, Pill, Segmented } from '../../components/ui';
+import { C, FONT, MONO, rise, statusColors, VIZ } from '../../lib/theme';
+import {
+  ApiError,
+  Button,
+  EmptyState,
+  KpiHero,
+  PageHeader,
+  Panel,
+  PanelTitle,
+  Pill,
+  Segmented,
+  Trend,
+} from '../../components/ui';
+import { StepRail } from '../../components/charts';
 import { RcaDashboard } from './RcaCharts';
 
 const FILTERS = [
@@ -102,6 +114,7 @@ export default function ComplaintsPage() {
   const investigating = complaints.filter((c) => c.status === 'INVESTIGATING').length;
   const resolved = complaints.filter((c) => c.status === 'RESOLVED').length;
   const withRca = complaints.filter((c) => c.rcaJson != null).length;
+  const linkedToShipment = complaints.filter((c) => c.shipment != null).length;
 
   const transition = async (id: string, status: string) => {
     setBusy(true);
@@ -119,15 +132,41 @@ export default function ComplaintsPage() {
     <>
       <PageHeader
         title="Complaints + Root Cause"
+        subtitle="Institution-filed issues, pre-linked to batch and shipment — zero manual ID entry."
         right={<Segmented options={FILTERS} value={filter} onChange={setFilter} />}
       />
 
-      <KpiBand columns={4}>
-        <Kpi label="Open" value={open} deltaColor={open ? C.amber : C.grey} />
-        <Kpi label="Investigating" value={investigating} deltaColor={C.accent} />
-        <Kpi label="Resolved" value={resolved} deltaColor={C.green} />
-        <Kpi label="With RCA" value={withRca} />
-      </KpiBand>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <KpiHero
+          index={0}
+          label="Open"
+          value={open}
+          accent={C.amber}
+          trend={<Trend value={open} goodDirection="down" />}
+        />
+        <KpiHero
+          index={1}
+          label="Investigating"
+          value={investigating}
+          accent={C.accent}
+          sub="Currently under review"
+        />
+        <KpiHero index={2} label="Resolved" value={resolved} accent={C.green} sub="Closed this window" />
+        <KpiHero
+          index={3}
+          label="Pre-linked to shipment"
+          value={`${linkedToShipment}/${complaints.length || 0}`}
+          accent={VIZ.violet}
+          sub="Zero manual ID entry"
+        />
+      </div>
 
       <div style={{ padding: '26px 26px 52px', display: 'grid', gap: 24 }}>
         {error && <ApiError error={error} />}
@@ -144,13 +183,13 @@ export default function ComplaintsPage() {
             alignItems: 'start',
           }}
         >
-          <Card style={{ animation: rise(0) }}>
-            <CardTitle>Complaints</CardTitle>
+          <Panel accent={C.ink} delayMs={0} style={{ animation: rise(0) }}>
+            <PanelTitle dot={C.ink}>Complaints</PanelTitle>
             {complaints.length === 0 ? (
-              <Empty>No complaints match this filter.</Empty>
+              <EmptyState title="No complaints" hint="No complaints match this filter." />
             ) : (
               <div style={{ maxHeight: 640, overflowY: 'auto' }}>
-                {complaints.map((c) => {
+                {complaints.map((c, i) => {
                   const active = c.id === selectedId;
                   const sc = statusColors(c.status);
                   return (
@@ -167,6 +206,7 @@ export default function ComplaintsPage() {
                         borderBottom: `1px solid ${C.borderSoft}`,
                         background: active ? C.bg : 'transparent',
                         cursor: 'pointer',
+                        animation: rise(i * 30),
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -192,6 +232,22 @@ export default function ComplaintsPage() {
                         >
                           {c.id.slice(0, 8)}
                         </span>
+                        {c.shipment && (
+                          <span
+                            style={{
+                              font: `600 9px/1 ${MONO}`,
+                              letterSpacing: '.06em',
+                              padding: '3px 6px',
+                              borderRadius: 3,
+                              background: C.accentTint,
+                              color: C.accent,
+                              whiteSpace: 'nowrap',
+                            }}
+                            title="Auto-linked to shipment — no manual ID entry"
+                          >
+                            ⛓ LINKED
+                          </span>
+                        )}
                         <div style={{ flex: 1 }} />
                         <span style={{ font: `400 10px/1 ${MONO}`, color: C.inkSoft }}>
                           {new Date(c.filedAt).toLocaleDateString('en-GB')}
@@ -208,19 +264,44 @@ export default function ComplaintsPage() {
                 })}
               </div>
             )}
-          </Card>
+          </Panel>
 
-          <Card style={{ flex: '2 1 480px', minWidth: 340 }}>
-            <CardTitle>Detail</CardTitle>
+          <Panel accent={C.accent} delayMs={40} style={{ flex: '2 1 480px', minWidth: 340 }}>
+            <PanelTitle dot={C.accent}>Detail</PanelTitle>
             {!selected ? (
-              <Empty>Select a complaint.</Empty>
+              <EmptyState title="Nothing selected" hint="Select a complaint from the queue to see its evidence." />
             ) : (
-              <div style={{ padding: 18, display: 'grid', gap: 14 }}>
+              <div style={{ padding: 18, display: 'grid', gap: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <Pill label={selected.category} />
                   <Pill label={selected.status} />
                   <span style={{ font: `500 15px/1.3 ${FONT}`, color: C.ink }}>{drugName(selected)}</span>
                 </div>
+
+                {selected.shipment && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '10px 13px',
+                      background: C.accentTint,
+                      border: `1px solid ${C.accent}33`,
+                      borderRadius: 4,
+                    }}
+                  >
+                    <span style={{ font: `600 13px/1 ${MONO}`, color: C.accent }}>⛓</span>
+                    <div>
+                      <div style={{ font: `600 11px/1.4 ${FONT}`, color: C.ink }}>
+                        Pre-linked to shipment {selected.shipment.id.slice(0, 8).toUpperCase()}
+                      </div>
+                      <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkFaint }}>
+                        {selected.shipment.status.replace(/_/g, ' ')} · {selected.shipment.excursionCount} excursion
+                        {selected.shipment.excursionCount === 1 ? '' : 's'} · matched automatically, no manual entry.
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <Field label="Assigned team" value={selected.assignedTeam ?? '—'} />
@@ -236,6 +317,35 @@ export default function ComplaintsPage() {
                   <div style={{ font: `400 13px/1.6 ${FONT}`, color: C.inkMuted }}>
                     {selected.description ?? 'No description provided.'}
                   </div>
+                </div>
+
+                {/* Custody rail — the evidence bundle beside the narrative prose. */}
+                <div>
+                  <div style={{ font: `600 10px/1 ${FONT}`, letterSpacing: '.14em', textTransform: 'uppercase', color: C.inkGhost, marginBottom: 8 }}>
+                    Evidence chain
+                  </div>
+                  <StepRail
+                    steps={[
+                      { label: 'Complaint filed', time: new Date(selected.filedAt).toLocaleString('en-GB'), dot: C.ink },
+                      ...(selected.batch
+                        ? [{ label: `Batch ${selected.batch.lotNumber}`, time: selected.batch.drug.name, dot: C.accent }]
+                        : []),
+                      ...(selected.shipment
+                        ? [
+                            {
+                              label: `Shipment ${selected.shipment.status.replace(/_/g, ' ')}`,
+                              time: `${selected.shipment.excursionCount} excursion(s) recorded`,
+                              dot: selected.shipment.excursionCount > 0 ? C.amber : C.green,
+                            },
+                          ]
+                        : []),
+                      {
+                        label: selected.status === 'RESOLVED' ? 'Resolved' : selected.status === 'INVESTIGATING' ? 'Under investigation' : 'Awaiting triage',
+                        time: selected.assignedTeam ?? 'Unassigned',
+                        dot: statusColors(selected.status).color,
+                      },
+                    ]}
+                  />
                 </div>
 
                 {selected.rcaJson == null ? (
@@ -305,7 +415,7 @@ export default function ComplaintsPage() {
                 </div>
               </div>
             )}
-          </Card>
+          </Panel>
         </div>
       </div>
     </>

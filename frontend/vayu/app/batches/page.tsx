@@ -11,8 +11,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { getBatches, type Batch } from '../../lib/api';
 import { C, FONT, MONO, statusColors } from '../../lib/theme';
 import { Search } from 'lucide-react';
-import { ApiError, Card, CardTitle, Kpi, KpiBand, PageHeader } from '../../components/ui';
-import { BarChart, PieChart } from '../../components/charts';
+import { ApiError, Card, CardTitle, EmptyState, Kpi, KpiBand, PageHeader } from '../../components/ui';
+import { BarChart, GaugeArc, PieChart } from '../../components/charts';
 import BatchCatalog from '../../components/BatchCatalog';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -49,6 +49,17 @@ export default function Batches() {
       color: statusColors(status).color,
     }));
   }, [batches]);
+
+  // QC pass rate — computed only from real qcRecords on the fetched batches.
+  // If none of the fetched batches carry inspection records, the gauge shows
+  // an honest empty state rather than a fabricated percentage.
+  const qcRecordResults = useMemo(
+    () => batches.flatMap((b) => b.qcRecords ?? []).map((r) => r.result),
+    [batches],
+  );
+  const qcPassRate = qcRecordResults.length
+    ? Math.round((qcRecordResults.filter((r) => r === 'PASS').length / qcRecordResults.length) * 100)
+    : null;
 
   const expiryWindowBars = useMemo(() => {
     const b = { expired: 0, d30: 0, d90: 0, d180: 0, over180: 0 };
@@ -90,7 +101,23 @@ export default function Batches() {
         ) : (
           <>
             {!loading && batches.length > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18 }}>
+                <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
+                  <CardTitle>QC pass rate</CardTitle>
+                  <div style={{ padding: 16, display: 'flex', justifyContent: 'center' }}>
+                    {qcPassRate == null ? (
+                      <EmptyState
+                        height={140}
+                        glyph="◇"
+                        title="No inspections on this page"
+                        hint="QC records will populate the gauge once batches are inspected."
+                      />
+                    ) : (
+                      <GaugeArc value={qcPassRate} label={`${qcRecordResults.length} inspections`} size={168} />
+                    )}
+                  </div>
+                </Card>
+
                 <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
                   <CardTitle>QC status distribution</CardTitle>
                   <div style={{ padding: 16, display: 'flex', gap: 20, alignItems: 'center' }}>

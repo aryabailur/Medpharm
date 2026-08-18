@@ -21,8 +21,20 @@ import {
   type Shipment,
   type TelemetryPoint,
 } from '../../lib/api';
-import { C, FONT, LABEL, MONO, rise, statusColors } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, Pill } from '../../components/ui';
+import { C, FONT, LABEL, MONO, rise, statusColors, VIZ } from '../../lib/theme';
+import {
+  ApiError,
+  Card,
+  CardTitle,
+  EmptyState,
+  Kpi,
+  LiveChip,
+  Mono,
+  Panel,
+  PanelTitle,
+  Pill,
+  SkeletonRows,
+} from '../../components/ui';
 import { ColumnChart, Legend, RouteMap, StepRail, TemperatureChart } from '../../components/charts';
 
 const MIN_C = 2;
@@ -77,6 +89,10 @@ function Inner() {
   const preselect = params.get('shipment');
 
   const [shipments, setShipments] = useState<Shipment[]>([]);
+  // Data arrives in a client effect, so on first paint the list is legitimately
+  // empty. Without this flag the rail shows "No shipments" mid-fetch, which
+  // reads as a broken screen rather than a pending one.
+  const [listLoaded, setListLoaded] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(preselect);
 
@@ -93,10 +109,27 @@ function Inner() {
         const res = await getShipments('?take=100');
         setShipments(res.items);
         setListError(null);
+        // No shipment requested via the URL: pick the most demo-worthy one —
+        // the in-flight, cold-chain shipment with the most open excursions —
+        // rather than leaving the screen blank. Never a fixed id: the seed
+        // regenerates ids on every reseed.
+        if (!preselect) {
+          const candidates = res.items.filter(
+            (s) => s.coldChain && ['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(s.status),
+          );
+          const hero = candidates.reduce<Shipment | null>(
+            (best, s) => (!best || s.excursionCount > best.excursionCount ? s : best),
+            null,
+          ) ?? candidates[0] ?? res.items[0] ?? null;
+          if (hero) setSelectedId((prev) => prev ?? hero.id);
+        }
       } catch (e) {
         setListError((e as Error).message);
+      } finally {
+        setListLoaded(true);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadDetail = useCallback(async (id: string) => {
@@ -207,6 +240,15 @@ function Inner() {
   });
 
   const openExcursion = excursions.find((e) => !e.endedAt) ?? null;
+  // For the alarm strip: an open excursion always wins; failing that, surface
+  // the most severe excursion recorded on this shipment (even if it already
+  // recovered) so a clean walk with one breach still shows the "money shot"
+  // rather than nothing at all.
+  const severityRank: Record<Excursion['severity'], number> = { CRITICAL: 3, MAJOR: 2, MINOR: 1 };
+  const notableExcursion =
+    openExcursion ??
+    [...excursions].sort((a, b) => severityRank[b.severity] - severityRank[a.severity])[0] ??
+    null;
   const institutionName = detail?.supplyOrder?.institution?.name ?? '—';
   const shortId = detail ? detail.id.slice(0, 8).toUpperCase() : '';
 
@@ -295,8 +337,10 @@ function Inner() {
           <div style={{ padding: 14 }}>
             <ApiError error={listError} />
           </div>
+        ) : !listLoaded ? (
+          <SkeletonRows rows={6} />
         ) : inFlightFirst.length === 0 ? (
-          <Empty>No shipments.</Empty>
+          <EmptyState glyph="□" title="No shipments" hint="Dispatched consignments will list here." height={140} />
         ) : (
           <div>
             {inFlightFirst.map((s) => {
@@ -335,7 +379,13 @@ function Inner() {
       <div style={{ flex: 1, minWidth: 0 }}>
         {!selectedId ? (
           <div style={{ padding: 26 }}>
-            <Empty>Select a shipment.</Empty>
+            {!listLoaded ? (
+              // Mid-fetch the hero shipment hasn't been chosen yet; a skeleton
+              // is honest here, "select a shipment" would be misleading.
+              <SkeletonRows rows={7} />
+            ) : (
+              <EmptyState glyph="◇" title="Select a shipment" hint="Choose a shipment from the list to see its live route and temperature trace." height={300} />
+            )}
           </div>
         ) : detailError ? (
           <div style={{ padding: 26 }}>
@@ -343,36 +393,53 @@ function Inner() {
           </div>
         ) : !detail ? (
           <div style={{ padding: 26 }}>
-            <Empty>Loading…</Empty>
+            <EmptyState glyph="…" title="Loading" height={300} />
           </div>
         ) : (
           <>
-            {openExcursion && (
-              <div style={{ borderBottom: '1px solid #E9C9C4', background: '#FDF6F5', animation: rise(0) }}>
-                <div style={{ height: 2, background: C.red, transformOrigin: 'left', animation: 'mtGrow .15s ease-out both' }} />
+            {notableExcursion && (
+              <div
+                style={{
+                  borderBottom: openExcursion ? '1px solid #E9C9C4' : `1px solid ${C.borderSoft}`,
+                  background: openExcursion ? '#FDF6F5' : C.raised,
+                  animation: rise(0),
+                }}
+              >
+                <div
+                  style={{
+                    height: 2,
+                    background: openExcursion ? C.red : C.amber,
+                    transformOrigin: 'left',
+                    animation: 'mtGrow .15s ease-out both',
+                  }}
+                />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '13px 20px' }}>
                   <span
                     style={{
                       font: `600 10px/1 ${MONO}`,
                       letterSpacing: '.12em',
-                      background: C.red,
+                      background: openExcursion ? C.red : C.amber,
                       color: '#FDF6F5',
                       padding: '5px 7px',
+                      borderRadius: 3,
                     }}
                   >
-                    ALARM
+                    {openExcursion ? 'ALARM' : 'RESOLVED'}
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ font: `600 15px/1.5 ${FONT}`, color: C.ink }}>
-                      {shortId} out of band
-                      {openExcursion.maxTempC != null ? ` — ${openExcursion.maxTempC.toFixed(1)} °C peak` : ''}
-                      {`, ${excursionDuration(openExcursion)} above ${MAX_C} °C`}
+                      {shortId} {openExcursion ? 'out of band' : 'breached and recovered'}
+                      {notableExcursion.maxTempC != null ? ` — ${notableExcursion.maxTempC.toFixed(1)} °C peak` : ''}
+                      {`, ${excursionDuration(notableExcursion)} above ${MAX_C} °C`}
                     </div>
                     <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 3 }}>
-                      Hysteresis fired {fmtClock(openExcursion.startedAt)} · {institutionName}
+                      Hysteresis fired {fmtClock(notableExcursion.startedAt)} · {institutionName}
+                      {!openExcursion && notableExcursion.endedAt ? ` · recovered ${fmtClock(notableExcursion.endedAt)}` : ''}
                     </div>
                   </div>
-                  <span style={{ font: `500 11px/1 ${MONO}`, color: C.amber }}>OPEN {fmtOpenDuration(openExcursion.startedAt)}</span>
+                  <span style={{ font: `500 11px/1 ${MONO}`, color: openExcursion ? C.amber : C.green }}>
+                    {openExcursion ? `OPEN ${fmtOpenDuration(openExcursion.startedAt)}` : excursionDuration(notableExcursion)}
+                  </span>
                   <button
                     style={{
                       border: `1px solid ${C.border}`,
@@ -384,50 +451,54 @@ function Inner() {
                       cursor: 'pointer',
                     }}
                   >
-                    Notify institution
+                    {openExcursion ? 'Notify institution' : 'View report'}
                   </button>
                 </div>
               </div>
             )}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) minmax(0,1fr)', gap: 24, padding: '26px 26px 0' }}>
-              <Card style={{ overflow: 'hidden', animation: rise(0) }}>
-                <CardTitle
+              <Panel accent={C.accent} delayMs={0} style={{ overflow: 'hidden' }}>
+                <PanelTitle
+                  dot={live ? C.green : undefined}
                   right={
-                    openExcursion && (
-                      <span
-                        style={{
-                          font: `600 10px/1 ${FONT}`,
-                          letterSpacing: '.06em',
-                          background: C.amberTint,
-                          color: C.amber,
-                          padding: '3px 7px',
-                          borderRadius: 3,
-                        }}
-                      >
-                        EXCURSION OPEN
-                      </span>
-                    )
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <LiveChip label={live ? 'live' : 'connecting'} color={live ? C.green : C.inkGhost} />
+                      {notableExcursion && (
+                        <span
+                          style={{
+                            font: `600 10px/1 ${FONT}`,
+                            letterSpacing: '.06em',
+                            background: openExcursion ? C.amberTint : C.greenTint,
+                            color: openExcursion ? C.amber : C.green,
+                            padding: '3px 7px',
+                            borderRadius: 3,
+                          }}
+                        >
+                          {openExcursion ? 'EXCURSION OPEN' : 'EXCURSION RESOLVED'}
+                        </span>
+                      )}
+                    </div>
                   }
                 >
                   {shortId} · live route
-                </CardTitle>
+                </PanelTitle>
                 <RouteMap
                   progress={detail.progressPct ?? 0}
                   origin={`ORIGIN · ${fmtClock(detail.dispatchedAt)}`}
                   destination={institutionName.toUpperCase()}
                   now={`NOW · ${Math.round((detail.progressPct ?? 0) * 100)}%`}
-                  incident={openExcursion ? `EXCURSION ${fmtClock(openExcursion.startedAt)}` : undefined}
+                  incident={notableExcursion ? `EXCURSION ${fmtClock(notableExcursion.startedAt)}` : undefined}
                   stats={[
                     { label: 'Progress', value: `${Math.round((detail.progressPct ?? 0) * 100)}%` },
                     { label: 'ETA', value: detail.etaAt ? fmtClock(detail.etaAt) : '—' },
                     { label: 'Points today', value: points.length.toLocaleString('en-IN') },
                   ]}
                 />
-              </Card>
+              </Panel>
 
-              <Card style={{ animation: rise(60) }}>
-                <CardTitle
+              <Panel accent={C.blue} delayMs={60}>
+                <PanelTitle
                   right={
                     <div style={{ textAlign: 'right' }}>
                       <span style={{ ...LABEL }}>Last reading</span>
@@ -450,16 +521,20 @@ function Inner() {
                   }
                 >
                   Chain of custody
-                </CardTitle>
+                </PanelTitle>
                 <div style={{ padding: '20px 20px 6px' }}>
-                  {steps.length === 0 ? <Empty>No lifecycle data.</Empty> : <StepRail steps={steps} />}
+                  {steps.length === 0 ? (
+                    <EmptyState glyph="○" title="No lifecycle data" hint="Custody steps populate once the shipment is dispatched." height={140} />
+                  ) : (
+                    <StepRail steps={steps} />
+                  )}
                 </div>
-              </Card>
+              </Panel>
             </div>
 
             <div style={{ padding: '26px 26px 0' }}>
-              <Card style={{ animation: rise(100) }}>
-                <CardTitle
+              <Panel accent={notableExcursion && openExcursion ? C.red : C.accent} delayMs={100}>
+                <PanelTitle
                   right={
                     <Legend
                       items={[
@@ -471,10 +546,10 @@ function Inner() {
                   }
                 >
                   Temperature · {MIN_C}–{MAX_C} °C band
-                </CardTitle>
+                </PanelTitle>
                 <div style={{ padding: 20 }}>
                   {tempPoints.length === 0 ? (
-                    <Empty>No temperature readings yet.</Empty>
+                    <EmptyState glyph="◇" title="No temperature readings yet" hint="Readings stream in once the reefer starts reporting." height={200} />
                   ) : (
                     <TemperatureChart
                       readings={tempPoints.map((p) => ({ ts: p.ts, tempC: p.tempC }))}
@@ -485,7 +560,7 @@ function Inner() {
                     />
                   )}
                 </div>
-              </Card>
+              </Panel>
             </div>
 
             <div
@@ -505,10 +580,10 @@ function Inner() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 300px', gap: 24, padding: '26px 26px 52px' }}>
-              <Card style={{ overflowX: 'auto', animation: rise(0) }}>
-                <CardTitle>Excursions</CardTitle>
+              <Panel accent={C.amber} delayMs={0} style={{ overflowX: 'auto' }}>
+                <PanelTitle>Excursions</PanelTitle>
                 {excursions.length === 0 ? (
-                  <Empty>No excursions recorded for this shipment.</Empty>
+                  <EmptyState glyph="✓" title="No excursions recorded" hint="This shipment has stayed in band for its whole journey." height={140} />
                 ) : (
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
                     <thead>
@@ -566,10 +641,10 @@ function Inner() {
                     </tbody>
                   </table>
                 )}
-              </Card>
+              </Panel>
 
-              <Card style={{ alignSelf: 'start', animation: rise(60) }}>
-                <CardTitle>By severity · this shipment</CardTitle>
+              <Panel accent={VIZ.slate} delayMs={60} style={{ alignSelf: 'start' }}>
+                <PanelTitle>By severity · this shipment</PanelTitle>
                 <div style={{ padding: 20 }}>
                   <ColumnChart
                     bars={[
@@ -584,7 +659,7 @@ function Inner() {
                     }
                   />
                 </div>
-              </Card>
+              </Panel>
             </div>
           </>
         )}

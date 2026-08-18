@@ -15,8 +15,9 @@ import {
   type Drug,
   type SupplyOrder,
 } from '../../lib/api';
-import { C, FONT, MONO, rise, statusColors } from '../../lib/theme';
-import { ApiError, Card, Empty, Pill } from '../../components/ui';
+import { C, FONT, MONO } from '../../lib/theme';
+import { ApiError, EmptyState, Panel, PanelTitle, Pill, Segmented } from '../../components/ui';
+import { ColumnChart } from '../../components/charts';
 
 const FILTERS = [
   { value: 'PENDING', label: 'Pending' },
@@ -138,36 +139,41 @@ export default function Approvals() {
     return riskRows.find((r) => instName && r.institution === instName) ?? null;
   }, [selected, riskRows]);
 
+  // Requested vs approved, one pair of bars per line — a lightweight grouped
+  // comparison built from the guaranteed ColumnChart primitive.
+  const allocationBars = useMemo(() => {
+    if (!selected) return [];
+    return selected.lines.flatMap((l) => {
+      const shortName = (l.drug?.name ?? 'Unknown').split(' ').slice(0, 2).join(' ');
+      return [
+        { label: `${shortName} req`, count: l.qtyRequested, color: C.inkGhost },
+        { label: `${shortName} appr`, count: l.qtyApproved ?? 0, color: C.accent },
+      ];
+    });
+  }, [selected]);
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 340px', gap: 24, padding: '26px 26px 52px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 360px', gap: 24, padding: '26px 26px 52px' }}>
       {/* LEFT — Supply-order approvals */}
-      <section style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, animation: rise(0) }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '17px 18px', borderBottom: `1px solid ${C.border}`, background: C.surfaceAlt }}>
-          <span style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
+      <Panel accent={C.accent} delayMs={0}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 13,
+            padding: '13px 16px',
+            borderBottom: `1px solid ${C.borderSoft}`,
+            background: C.surfaceAlt,
+          }}
+        >
+          <span style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.15em', textTransform: 'uppercase', color: C.inkFaint }}>
             Supply-order approvals
           </span>
           <div style={{ flex: 1 }} />
-          {FILTERS.map((f) => {
-            const active = f.value === filter;
-            return (
-              <button
-                key={f.value || 'all'}
-                onClick={() => setFilter(f.value)}
-                style={{
-                  border: `1px solid ${active ? C.inkStrong : '#E4E2DF'}`,
-                  background: active ? C.inkStrong : C.surface,
-                  color: active ? '#fff' : '#4A4542',
-                  font: `500 11px/1 ${FONT}`,
-                  padding: '6px 10px',
-                  borderRadius: 3,
-                  cursor: 'pointer',
-                  marginLeft: 6,
-                }}
-              >
-                {f.label}
-              </button>
-            );
-          })}
+          <span style={{ font: `500 11px/1 ${MONO}`, color: C.inkFaint }}>{orders.length} shown</span>
+          <div style={{ marginLeft: 10 }}>
+            <Segmented options={FILTERS} value={filter} onChange={setFilter} />
+          </div>
         </div>
 
         {error && (
@@ -176,11 +182,14 @@ export default function Approvals() {
           </div>
         )}
 
-        {orders.length === 0 ? (
-          <Empty>No orders match this filter.</Empty>
+        {!error && orders.length === 0 ? (
+          <EmptyState
+            glyph="☐"
+            title="No orders match this filter"
+            hint="Try another status, or switch to All to see the full queue."
+          />
         ) : (
           orders.map((o) => {
-            const sc = statusColors(o.status);
             const busy = busyId === o.id;
             const lineSummary = o.lines
               .map((l) => l.drug?.name ?? 'Unknown drug')
@@ -190,11 +199,13 @@ export default function Approvals() {
               <div
                 key={o.id}
                 onClick={() => setSelectedId(o.id)}
+                className="mt-row-hover"
                 style={{
                   padding: 18,
                   borderBottom: `1px solid ${C.borderSoft}`,
                   cursor: 'pointer',
-                  background: selectedId === o.id ? C.surfaceAlt : 'transparent',
+                  background: selectedId === o.id ? C.accentTint : 'transparent',
+                  transition: 'background .16s ease',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -202,6 +213,9 @@ export default function Approvals() {
                     {o.id.slice(0, 8)}
                   </span>
                   <Pill label={o.status} />
+                  {o.status === 'PENDING' && (o.ageHours ?? 0) >= 4 && (
+                    <span style={{ font: `500 10px/1 ${MONO}`, color: C.amber }}>{o.ageHours}h old</span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 18, marginTop: 10 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -220,11 +234,6 @@ export default function Approvals() {
                     </div>
                     {o.status === 'PENDING' && (
                       <div style={{ display: 'flex', gap: 7, marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
-                        <button
-                          style={{ border: `1px solid ${C.border}`, background: C.surface, font: `500 12px/1 ${FONT}`, color: C.ink, padding: '7px 10px', borderRadius: 4, cursor: 'pointer' }}
-                        >
-                          Partial
-                        </button>
                         <button
                           disabled={busy}
                           onClick={() => handleReject(o.id)}
@@ -247,24 +256,32 @@ export default function Approvals() {
             );
           })
         )}
-      </section>
+      </Panel>
 
       {/* RIGHT aside */}
       <aside style={{ display: 'flex', flexDirection: 'column', gap: 24, alignSelf: 'start' }}>
-        <Card style={{ animation: rise(60) }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '17px 18px', borderBottom: `1px solid ${C.border}`, background: C.surfaceAlt }}>
-            <span style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
-              {selected ? selected.id.slice(0, 12) : 'Order'} · allocation
-            </span>
-          </div>
+        <Panel accent={C.blue} delayMs={60}>
+          <PanelTitle>{selected ? selected.id.slice(0, 12) : 'Order'} · allocation</PanelTitle>
           {!selected ? (
-            <Empty>Select an order to see its allocation.</Empty>
+            <EmptyState
+              glyph="◇"
+              title="Select an order"
+              hint="Click a row on the left to see its requested vs. approved allocation."
+              height={220}
+            />
           ) : (
             <div style={{ padding: 20 }}>
               <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint }}>
                 {selected.institution?.name ?? 'Unknown institution'} · placed{' '}
                 {new Date(selected.placedAt).toLocaleString('en-GB')}
               </div>
+
+              {allocationBars.length > 0 && (
+                <div style={{ marginTop: 14, marginBottom: 4 }}>
+                  <ColumnChart bars={allocationBars} height={100} barMax={64} valueFont={`600 10px/1 ${MONO}`} />
+                </div>
+              )}
+
               {selected.lines.map((l) => {
                 const full = l.qtyApproved != null && l.qtyApproved >= l.qtyRequested;
                 const cut = l.qtyApproved != null && l.qtyApproved < l.qtyRequested;
@@ -311,33 +328,21 @@ export default function Approvals() {
               </div>
             </div>
           )}
-        </Card>
+        </Panel>
 
-        <section
-          style={{
-            border: `1px solid ${C.border}`,
-            borderLeft: `2px solid ${C.ink}`,
-            borderRadius: 4,
-            background: C.surface,
-            animation: rise(120),
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '17px 18px', borderBottom: `1px solid ${C.border}`, background: C.surfaceAlt }}>
-            <span style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
-              Nidana · why this allocation
-            </span>
-          </div>
+        <Panel accent={C.amber} delayMs={120}>
+          <PanelTitle dot={riskForSelected ? C.amber : undefined}>Nidana · why this allocation</PanelTitle>
           <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
             {!selected ? (
-              <Empty>Select an order to see Nidana's read.</Empty>
+              <EmptyState glyph="◆" title="Select an order" hint="Nidana's stockout read appears once an order is selected." height={180} />
             ) : riskForSelected ? (
               <>
-                <div style={{ font: `400 14px/1.8 ${FONT}`, color: C.inkMuted }}>
+                <div style={{ font: `400 14px/1.8 ${FONT}`, color: C.inkMuted, padding: '6px 6px 0' }}>
                   {riskForSelected.drug} at {riskForSelected.institution} carries a {riskForSelected.band.toLowerCase()}{' '}
                   stockout band with {riskForSelected.confidence} confidence, from {riskForSelected.signals.length} agreeing
                   signals.
                 </div>
-                <div style={{ display: 'flex', gap: 20, borderTop: `1px solid ${C.borderSoft}`, paddingTop: 11 }}>
+                <div style={{ display: 'flex', gap: 20, borderTop: `1px solid ${C.borderSoft}`, paddingTop: 11, padding: '11px 6px 0' }}>
                   <div>
                     <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
                       Stockout risk if held
@@ -355,17 +360,17 @@ export default function Approvals() {
                     </div>
                   </div>
                 </div>
-                <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint }}>
+                <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, padding: '0 6px' }}>
                   Signals: {riskForSelected.signals.map((s) => s.name.replace(/_/g, ' ')).join(' · ')}.
                 </div>
               </>
             ) : (
-              <div style={{ font: `400 14px/1.8 ${FONT}`, color: C.inkMuted }}>
+              <div style={{ font: `400 14px/1.8 ${FONT}`, color: C.inkMuted, padding: '6px 6px 0' }}>
                 No Nidana risk flag matches this institution — this allocation is not on the current stockout watchlist.
               </div>
             )}
           </div>
-        </section>
+        </Panel>
       </aside>
     </div>
   );

@@ -8,8 +8,8 @@
 import { useEffect, useState } from 'react';
 
 import { askAssistant, getFulfilment, type FulfilmentRow } from '../../lib/api';
-import { C, FONT, MONO, bandColors, rise } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty } from '../../components/ui';
+import { bandColors, C, FONT, MONO, rise } from '../../lib/theme';
+import { ApiError, EmptyState, Panel, PanelTitle, ScoreBadge, SkeletonRows } from '../../components/ui';
 import { BarChart, ForecastChart, Meter, SignalBars } from '../../components/charts';
 
 interface RiskSignal {
@@ -153,18 +153,64 @@ export default function RiskPage() {
       color: d.direction === 'RISING' ? C.red : d.direction === 'FALLING' ? C.green : C.accent,
     })) ?? [];
 
+  const criticalCount = (riskData ?? []).filter((r) => r.band === 'CRITICAL').length;
+  const highCount = (riskData ?? []).filter((r) => r.band === 'HIGH').length;
+  const avgConfidenceAgree =
+    (riskData ?? []).length > 0
+      ? Math.round(
+          ((riskData ?? []).filter((r) => r.confidence === 'high').length / (riskData ?? []).length) * 100,
+        )
+      : null;
+
   return (
     <>
+      {/* KPI strip — the shape of the risk picture before the drilldown. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <div style={{ padding: '22px 24px', borderRight: `1px solid ${C.borderFaint}` }}>
+          <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.15em', textTransform: 'uppercase', color: C.inkFaint }}>
+            Flagged pairs
+          </div>
+          <div style={{ font: `600 34px/1 ${MONO}`, marginTop: 10, color: C.ink }}>{riskData?.length ?? '—'}</div>
+        </div>
+        <div style={{ padding: '22px 24px', borderRight: `1px solid ${C.borderFaint}` }}>
+          <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.15em', textTransform: 'uppercase', color: C.inkFaint }}>
+            Critical
+          </div>
+          <div style={{ font: `600 34px/1 ${MONO}`, marginTop: 10, color: C.red }}>{riskData ? criticalCount : '—'}</div>
+        </div>
+        <div style={{ padding: '22px 24px', borderRight: `1px solid ${C.borderFaint}` }}>
+          <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.15em', textTransform: 'uppercase', color: C.inkFaint }}>
+            High
+          </div>
+          <div style={{ font: `600 34px/1 ${MONO}`, marginTop: 10, color: C.amber }}>{riskData ? highCount : '—'}</div>
+        </div>
+        <div style={{ padding: '22px 24px' }}>
+          <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.15em', textTransform: 'uppercase', color: C.inkFaint }}>
+            High-confidence share
+          </div>
+          <div style={{ font: `600 34px/1 ${MONO}`, marginTop: 10, color: C.accent }}>
+            {avgConfidenceAgree != null ? `${avgConfidenceAgree}%` : '—'}
+          </div>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.15fr)', gap: 24, padding: '26px 26px 0' }}>
-        <Card style={{ borderLeft: `2px solid ${C.red}`, animation: rise(0) }}>
-          <CardTitle>Nidana · risk drilldown</CardTitle>
+        <Panel accent={C.red} delayMs={0}>
+          <PanelTitle dot={C.red}>Nidana · risk drilldown</PanelTitle>
           <div style={{ padding: 20 }}>
             {riskError ? (
               <ApiError error={riskError} />
             ) : riskData === null ? (
-              <Empty>Loading…</Empty>
+              <SkeletonRows rows={5} />
             ) : !top ? (
-              <Empty>No stockout risk detected.</Empty>
+              <EmptyState glyph="✓" title="No stockout risk" hint="Every tracked pair is within safe coverage." tone={C.green} />
             ) : (
               <>
                 <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16 }}>
@@ -178,9 +224,7 @@ export default function RiskPage() {
                       signals point the same way.
                     </div>
                   </div>
-                  <div style={{ font: `600 52px/1 ${MONO}`, letterSpacing: '-.05em', color: bc.color }}>
-                    {Math.round(top.score)}
-                  </div>
+                  <ScoreBadge score={top.score} band={top.band} digits={0} />
                 </div>
 
                 {(riskData ?? []).length > 1 && (
@@ -211,10 +255,11 @@ export default function RiskPage() {
               </>
             )}
           </div>
-        </Card>
+        </Panel>
 
-        <Card style={{ animation: rise(60) }}>
-          <CardTitle
+        <Panel accent={C.forecastLine} delayMs={60}>
+          <PanelTitle
+            dot={C.forecastLine}
             right={
               forecast?.metrics && (
                 <span style={{ font: `500 11px/1 ${MONO}`, color: C.inkMuted }}>MAPE {forecast.metrics.mape}%</span>
@@ -222,14 +267,14 @@ export default function RiskPage() {
             }
           >
             Demand forecast{forecast ? ` · ${forecast.drug}` : ''}
-          </CardTitle>
+          </PanelTitle>
           <div style={{ padding: 20 }}>
             {forecastError ? (
               <ApiError error={forecastError} />
             ) : forecastData === null ? (
-              <Empty>Loading…</Empty>
+              <SkeletonRows rows={5} />
             ) : !forecast ? (
-              <Empty>No forecast data available.</Empty>
+              <EmptyState title="No forecast" hint="No forecast data available for this pair." />
             ) : (
               <>
                 <ForecastChart history={history} forecast={forecastPoints} band={band} yFormat={(v) => Math.round(v).toLocaleString('en-IN')} />
@@ -246,7 +291,7 @@ export default function RiskPage() {
                     Why the model says this
                   </div>
                   {drivers.length === 0 ? (
-                    <Empty>No driver attribution available.</Empty>
+                    <EmptyState height={100} title="No attribution" hint="No driver attribution available." />
                   ) : (
                     <BarChart data={drivers} valueFormat={(v) => `${v > 0 ? '+' : ''}${v}%`} />
                   )}
@@ -254,20 +299,20 @@ export default function RiskPage() {
               </>
             )}
           </div>
-        </Card>
+        </Panel>
       </div>
 
       <div style={{ padding: '26px 26px 52px' }}>
-        <Card style={{ overflowX: 'auto', animation: rise(100) }}>
-          <CardTitle>Coverage gaps · {monthLabel}</CardTitle>
+        <Panel accent={C.accent} delayMs={100} style={{ overflowX: 'auto' }}>
+          <PanelTitle dot={C.accent}>Coverage gaps · {monthLabel}</PanelTitle>
           {coverageError ? (
             <div style={{ padding: 16 }}>
               <ApiError error={coverageError} />
             </div>
           ) : coverage === null ? (
-            <Empty>Loading…</Empty>
+            <SkeletonRows rows={5} />
           ) : coverage.length === 0 ? (
-            <Empty>No fulfilment data available.</Empty>
+            <EmptyState title="No fulfilment data" hint="Coverage data will appear once orders and dispensing sync." />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
               <thead>
@@ -318,7 +363,7 @@ export default function RiskPage() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
