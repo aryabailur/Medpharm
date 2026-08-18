@@ -299,5 +299,29 @@ export const riseScale = (delayMs = 0) =>
 /** Radar sweep for a map/live panel. */
 export const sweep = (durationS = 3) => `mtSweep ${durationS}s linear infinite`;
 
+/**
+ * Container edges.
+ *
+ * The handoff's single #D6D2CB hairline vanishes on a projector, so panels read
+ * as floating text rather than boxes. These are a touch darker and are used for
+ * anything that encloses content; the original C.border stays for the light
+ * rules *inside* a panel, so hierarchy still reads.
+ */
+export const EDGE = {
+  /** Card / panel outer edge. */
+  strong: '#C4BEB5',
+  /** Softer enclosure — nested boxes, inputs, chips. */
+  medium: '#CFCAC2',
+  /** Divider between cells of one band. */
+  divider: '#DDD8D0',
+} as const;
+
+/** Ready-made border shorthands, so a panel never hand-rolls its own width. */
+export const BORDER = {
+  card: `1px solid ${EDGE.strong}`,
+  inner: `1px solid ${EDGE.medium}`,
+  divider: `1px solid ${EDGE.divider}`,
+} as const;
+
 /** Standard hover transition for an interactive card or row. */
 export const HOVER = `background .18s ${EASE}, box-shadow .22s ${EASE}, transform .22s ${EASE}, border-color .18s ${EASE}`;
