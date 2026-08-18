@@ -14,7 +14,16 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { getDelayed, getInventory, getOrders, reorder, type IncomingShipment, type InventoryRow, type OrderRow } from '../../lib/api';
+import {
+  getDelayed,
+  getInventory,
+  getOrders,
+  placeOrder,
+  reorder,
+  type IncomingShipment,
+  type InventoryRow,
+  type OrderRow,
+} from '../../lib/api';
 import { C, FONT, MONO, rise, rupees, statusColors, VIZ } from '../../lib/theme';
 import { ApiError, EmptyState, KpiHero, PageHeader, Panel, PanelTitle, Pill } from '../../components/ui';
 import { ColumnChart, GroupedBarChart } from '../../components/charts';
@@ -37,6 +46,27 @@ function orderStatus(o: OrderRow): string {
 
 type DelayedShipment = IncomingShipment & { daysLate: number | null };
 
+/** One editable line in the pre-commit review draft opened by "Review
+ * suggestions". Seeded from the same below-reorder-point rows and suggested
+ * quantity that `handleOneTapReorder` uses, but held for human edit before
+ * anything is sent. */
+interface DraftLine {
+  inventoryId: string;
+  drugId: string;
+  drugName: string;
+  qtyOnHand: number;
+  reorderPoint: number;
+  suggestedQty: number;
+  qty: number;
+}
+
+// This app's convention for "this institution, calling about itself" — the
+// same literal used by scanin/page.tsx and the backend's assistant route for
+// self-referential institutionId. There is no per-institution session/config
+// in this app, so this is the only real source; reused verbatim rather than
+// inventing a new literal.
+const SELF_INSTITUTION_ID = 'self';
+
 export default function Orders() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [delayed, setDelayed] = useState<DelayedShipment[]>([]);
@@ -44,6 +74,10 @@ export default function Orders() {
   const [error, setError] = useState<string | null>(null);
   const [placing, setPlacing] = useState(false);
   const [placeMsg, setPlaceMsg] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [draft, setDraft] = useState<DraftLine[]>([]);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftResult, setDraftResult] = useState<{ supplyOrderId: string } | null>(null);
 
   const load = async () => {
     try {
@@ -124,12 +158,80 @@ export default function Orders() {
     setPlaceMsg(null);
     try {
       for (const r of belowReorder) {
-        await reorder({ inventoryId: r.id, institutionId: '', drugRef: r.drugId });
+        await reorder({ inventoryId: r.id, institutionId: SELF_INSTITUTION_ID, drugRef: r.drugId });
       }
       setPlaceMsg(`${belowReorder.length} draft line${belowReorder.length === 1 ? '' : 's'} added from forecast.`);
       await load();
     } catch (e) {
       setPlaceMsg(`Reorder failed: ${(e as Error).message}`);
+    } finally {
+      setPlacing(false);
+    }
+  };
+
+  /** Same suggested-quantity rule as the backend's one-tap reorder endpoint
+   * (`orders/place.ts`: top back up to twice the reorder point, or one unit
+   * past it, whichever is larger) — the draft must not invent a second rule. */
+  const suggestQty = (r: InventoryRow): number => {
+    const target = Math.max(r.reorderPoint * 2, r.reorderPoint + 1);
+    return Math.max(1, target - r.qtyOnHand);
+  };
+
+  const openReview = () => {
+    setDraft(
+      belowReorder.map((r) => ({
+        inventoryId: r.id,
+        drugId: r.drugId,
+        drugName: r.drug.name,
+        qtyOnHand: r.qtyOnHand,
+        reorderPoint: r.reorderPoint,
+        suggestedQty: suggestQty(r),
+        qty: suggestQty(r),
+      })),
+    );
+    setDraftError(null);
+    setDraftResult(null);
+    setReviewOpen(true);
+  };
+
+  const closeReview = () => {
+    setReviewOpen(false);
+    setDraftError(null);
+  };
+
+  const updateDraftQty = (inventoryId: string, raw: string) => {
+    const parsed = Number(raw);
+    setDraft((d) => d.map((line) => (line.inventoryId === inventoryId ? { ...line, qty: raw === '' ? NaN : parsed } : line)));
+  };
+
+  const removeDraftLine = (inventoryId: string) => {
+    setDraft((d) => d.filter((line) => line.inventoryId !== inventoryId));
+  };
+
+  const draftTotalUnits = draft.reduce((sum, line) => sum + (Number.isFinite(line.qty) ? line.qty : 0), 0);
+  const draftInvalid = draft.some((line) => !Number.isInteger(line.qty) || line.qty < 1);
+
+  const handleSubmitDraft = async () => {
+    if (draft.length === 0) {
+      setDraftError('Add at least one line before placing the order.');
+      return;
+    }
+    if (draftInvalid) {
+      setDraftError('Every quantity must be a whole number of at least 1.');
+      return;
+    }
+    setPlacing(true);
+    setDraftError(null);
+    try {
+      const res = await placeOrder({
+        institutionId: SELF_INSTITUTION_ID,
+        lines: draft.map((line) => ({ drugId: line.drugId, qtyRequested: line.qty })),
+      });
+      setDraftResult({ supplyOrderId: res.supplyOrderId });
+      setPlaceMsg(`Order ${res.supplyOrderId.slice(0, 12)} placed (${draft.length} line${draft.length === 1 ? '' : 's'}) — awaiting the manufacturer's approval.`);
+      await load();
+    } catch (e) {
+      setDraftError((e as Error).message);
     } finally {
       setPlacing(false);
     }
@@ -213,14 +315,16 @@ export default function Orders() {
               </div>
             </div>
             <button
+              onClick={openReview}
+              disabled={belowReorder.length === 0}
               style={{
                 border: `1px solid ${C.border}`,
                 background: C.surface,
                 font: `500 12px/1 ${FONT}`,
-                color: C.ink,
+                color: belowReorder.length === 0 ? C.inkGhost : C.ink,
                 padding: '8px 12px',
                 borderRadius: 4,
-                cursor: 'pointer',
+                cursor: belowReorder.length === 0 ? 'not-allowed' : 'pointer',
               }}
             >
               Review suggestions
@@ -349,21 +453,22 @@ export default function Orders() {
                 <span style={{ font: `600 24px/1 ${MONO}`, letterSpacing: '-.03em' }}>{rupees(draftValue)}</span>
               </div>
               <button
-                onClick={handleOneTapReorder}
-                disabled={placing || belowReorder.length === 0}
+                onClick={openReview}
+                disabled={belowReorder.length === 0}
+                title="Opens the editable draft below for review before anything is sent"
                 style={{
                   border: 0,
-                  background: placing || belowReorder.length === 0 ? C.inkGhost : C.ink,
+                  background: belowReorder.length === 0 ? C.inkGhost : C.ink,
                   color: C.bg,
                   font: `500 12px/1 ${FONT}`,
                   padding: 11,
                   borderRadius: 4,
-                  cursor: placing || belowReorder.length === 0 ? 'not-allowed' : 'pointer',
+                  cursor: belowReorder.length === 0 ? 'not-allowed' : 'pointer',
                   width: '100%',
                   marginTop: 12,
                 }}
               >
-                {placing ? 'Placing…' : 'Place order'}
+                Review &amp; place order
               </button>
             </div>
           </Panel>
@@ -396,6 +501,186 @@ export default function Orders() {
           </Panel>
         </aside>
       </div>
+
+      {reviewOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(20,18,14,0.42)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+            padding: '48px 24px',
+            zIndex: 50,
+            overflowY: 'auto',
+          }}
+          onClick={closeReview}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 620,
+              maxWidth: '100%',
+              background: C.surface,
+              border: `1px solid ${C.border}`,
+              borderRadius: 6,
+              boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
+              animation: rise(0),
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '16px 20px',
+                borderBottom: `1px solid ${C.border}`,
+              }}
+            >
+              <div>
+                <div style={{ font: `600 15px/1.3 ${FONT}` }}>Review suggestions</div>
+                <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkFaint, marginTop: 3 }}>
+                  A proposal, not yet sent. Adjust quantities or remove lines, then confirm.
+                </div>
+              </div>
+              <button
+                onClick={closeReview}
+                style={{
+                  border: `1px solid ${C.border}`,
+                  background: C.surface,
+                  color: C.inkFaint,
+                  font: `500 12px/1 ${FONT}`,
+                  padding: '6px 10px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+              {draft.length === 0 ? (
+                <EmptyState title="No lines in this draft" hint="Remove-only for now — every line came from below-reorder-point stock." height={140} />
+              ) : (
+                draft.map((line) => {
+                  const invalid = !Number.isInteger(line.qty) || line.qty < 1;
+                  return (
+                    <div
+                      key={line.inventoryId}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 14,
+                        padding: '14px 20px',
+                        borderBottom: `1px solid ${C.borderSoft}`,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ font: `500 13px/1.5 ${FONT}` }}>{line.drugName}</div>
+                        <div style={{ font: `400 11px/1.6 ${MONO}`, color: C.inkFaint, marginTop: 2 }}>
+                          on hand {line.qtyOnHand.toLocaleString('en-IN')} · reorder point {line.reorderPoint.toLocaleString('en-IN')}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ font: `400 10px/1.4 ${FONT}`, color: C.inkGhost, marginBottom: 3 }}>
+                          suggested {line.suggestedQty.toLocaleString('en-IN')}
+                        </div>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={Number.isNaN(line.qty) ? '' : line.qty}
+                          onChange={(e) => updateDraftQty(line.inventoryId, e.target.value)}
+                          style={{
+                            width: 84,
+                            font: `600 13px/1 ${MONO}`,
+                            color: invalid ? C.red : C.ink,
+                            border: `1px solid ${invalid ? '#E4C7C4' : C.border}`,
+                            borderRadius: 4,
+                            padding: '6px 8px',
+                            textAlign: 'right',
+                          }}
+                        />
+                      </div>
+                      <button
+                        onClick={() => removeDraftLine(line.inventoryId)}
+                        title={`Remove ${line.drugName} from this draft`}
+                        style={{
+                          border: `1px solid ${C.border}`,
+                          background: C.surface,
+                          color: C.inkFaint,
+                          font: `500 11px/1 ${FONT}`,
+                          padding: '7px 9px',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={{ padding: '14px 20px', borderTop: `1px solid ${C.border}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', font: `400 12px/1.6 ${FONT}`, color: C.inkFaint }}>
+                <span>
+                  {draft.length} line{draft.length === 1 ? '' : 's'}
+                </span>
+                <span>{draftTotalUnits.toLocaleString('en-IN')} units total</span>
+              </div>
+
+              {draftError && (
+                <div style={{ font: `500 12px/1.6 ${FONT}`, color: C.red, marginTop: 10 }}>{draftError}</div>
+              )}
+
+              {draftResult && (
+                <div style={{ font: `500 12px/1.6 ${FONT}`, color: C.green, marginTop: 10 }}>
+                  Order {draftResult.supplyOrderId.slice(0, 12)} placed — awaiting the manufacturer&rsquo;s approval.
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                <button
+                  onClick={closeReview}
+                  style={{
+                    border: `1px solid ${C.border}`,
+                    background: C.surface,
+                    color: C.inkMuted,
+                    font: `500 12px/1 ${FONT}`,
+                    padding: '10px 14px',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmitDraft}
+                  disabled={placing || draft.length === 0 || draftInvalid}
+                  style={{
+                    flex: 1,
+                    border: 0,
+                    background: placing || draft.length === 0 || draftInvalid ? C.inkGhost : C.ink,
+                    color: C.bg,
+                    font: `600 12px/1 ${FONT}`,
+                    padding: '10px 14px',
+                    borderRadius: 4,
+                    cursor: placing || draft.length === 0 || draftInvalid ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {placing ? 'Placing…' : `Place order · ${draft.length} line${draft.length === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
