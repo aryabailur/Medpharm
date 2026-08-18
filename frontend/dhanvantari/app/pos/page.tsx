@@ -11,8 +11,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { dispense, getDispenses, getInventory, type Dispense, type InventoryRow } from '../../lib/api';
-import { C, FONT, MONO, rise } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Mono, PageHeader } from '../../components/ui';
+import { C, FONT, MONO, VIZ } from '../../lib/theme';
+import { ApiError, EmptyState, Mono, PageHeader, Panel, PanelTitle } from '../../components/ui';
+import { BarChart } from '../../components/charts';
 
 const LABEL_SM = {
   font: `600 11px/1 ${FONT}`,
@@ -98,17 +99,46 @@ export default function Pos() {
   );
   const dispensedTodayQty = todaysDispenses.reduce((sum, d) => sum + d.qty, 0);
 
+  // Top drugs dispensed today — the ledger carries no per-day breakdown by
+  // drug elsewhere, so this is derived directly from today's dispense rows.
+  const topToday = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const d of todaysDispenses) {
+      const name = d.drug?.name ?? d.drugId;
+      map.set(name, (map.get(name) ?? 0) + d.qty);
+    }
+    return Array.from(map.entries())
+      .map(([label, value]) => ({ label, value, color: VIZ.teal }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  }, [todaysDispenses]);
+
   return (
     <>
       <PageHeader title="POS / Dispensing" />
 
+      <div style={{ padding: '26px 26px 0' }}>
+        <Panel delayMs={0}>
+          <PanelTitle right={<span style={{ font: `500 11px/1 ${MONO}`, color: C.inkFaint }}>{todaysDispenses.length} lines today</span>}>
+            Top drugs dispensed today
+          </PanelTitle>
+          <div style={{ padding: 18 }}>
+            {topToday.length === 0 ? (
+              <EmptyState title="No dispenses recorded today" height={120} />
+            ) : (
+              <BarChart data={topToday} />
+            )}
+          </div>
+        </Panel>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,0.85fr) minmax(0,1.15fr)', gap: 24, padding: '26px 26px 52px' }}>
         {error && <ApiError error={error} />}
 
-        <Card style={{ animation: rise(0) }}>
-          <CardTitle right={<span style={{ font: `400 11px/1 ${MONO}`, color: C.inkSoft }}>counter C-2</span>}>
+        <Panel delayMs={0}>
+          <PanelTitle right={<span style={{ font: `400 11px/1 ${MONO}`, color: C.inkSoft }}>counter C-2</span>}>
             Dispense
-          </CardTitle>
+          </PanelTitle>
           <div style={{ padding: 20 }}>
             <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint }}>
               Scan or search. Quantity is a proposal until confirmed.
@@ -310,12 +340,12 @@ export default function Pos() {
               </div>
             </div>
           </div>
-        </Card>
+        </Panel>
 
-        <Card style={{ animation: rise(60), overflow: 'hidden' }}>
-          <CardTitle>Dispensing ledger</CardTitle>
+        <Panel delayMs={60} style={{ overflow: 'hidden' }}>
+          <PanelTitle>Dispensing ledger</PanelTitle>
           {dispenses.length === 0 ? (
-            <Empty>No dispenses recorded yet.</Empty>
+            <EmptyState title="No dispenses recorded yet" height={180} />
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
@@ -412,7 +442,7 @@ export default function Pos() {
               </table>
             </div>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );

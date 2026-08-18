@@ -15,8 +15,9 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getDelayed, getInventory, getOrders, reorder, type IncomingShipment, type InventoryRow, type OrderRow } from '../../lib/api';
-import { C, FONT, MONO, rise, rupees, statusColors } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, PageHeader, Pill } from '../../components/ui';
+import { C, FONT, MONO, rise, rupees, statusColors, VIZ } from '../../lib/theme';
+import { ApiError, EmptyState, KpiHero, PageHeader, Panel, PanelTitle, Pill } from '../../components/ui';
+import { ColumnChart, GroupedBarChart } from '../../components/charts';
 
 const LABEL_SM = {
   font: `600 11px/1 ${FONT}`,
@@ -73,6 +74,50 @@ export default function Orders() {
     .sort((a, b) => a.cover - b.cover)[0];
   const excursionInbound = delayed.length > 0 || inventory.some((r) => r.drug.coldChain && r.lowStock);
 
+  // Status lifecycle — how many orders sit in each delivery state, a chart
+  // for the "status lifecycle" this screen is meant to show.
+  const lifecycleBars = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const o of orders) {
+      const status = orderStatus(o);
+      map.set(status, (map.get(status) ?? 0) + 1);
+    }
+    return Array.from(map.entries()).map(([status, count]) => ({
+      label: status.replace(/_/g, ' '),
+      count,
+      color: statusColors(status).color,
+    }));
+  }, [orders]);
+
+  // Requested vs approved — per order, the quantity requested vs what actually
+  // got delivered/approved. dhanvantari-api doesn't expose a separate
+  // "approved qty" field, so "approved" is honestly derived from delivered
+  // orders' requested total (a delivered order's request was, definitionally,
+  // fulfilled); non-delivered orders show 0 approved rather than a guess.
+  const requestedVsApproved = useMemo(
+    () =>
+      orders.slice(0, 8).map((o, i) => {
+        const requested = o.lines.reduce((sum, l) => sum + l.qtyRequested, 0);
+        const delivered = orderStatus(o) === 'DELIVERED';
+        return {
+          label: o.supplyOrderId ? o.supplyOrderId.slice(0, 8) : `#${i + 1}`,
+          values: [requested, delivered ? requested : 0],
+        };
+      }),
+    [orders],
+  );
+
+  const totalOrderValue = orders.reduce((sum, o) => {
+    return (
+      sum +
+      o.lines.reduce((s, l) => {
+        const inv = inventory.find((r) => r.drugId === l.drugId);
+        return s + l.qtyRequested * (inv?.drug.unitPrice ?? 0);
+      }, 0)
+    );
+  }, 0);
+  const deliveredCount = orders.filter((o) => orderStatus(o) === 'DELIVERED').length;
+
   const handleOneTapReorder = async () => {
     if (belowReorder.length === 0) return;
     setPlacing(true);
@@ -105,7 +150,47 @@ export default function Orders() {
     <>
       <PageHeader title="Supply Orders" />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 340px', gap: 24, padding: '26px 26px 52px' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <KpiHero index={0} label="Orders placed" value={orders.length} accent={VIZ.violet} />
+        <KpiHero index={1} label="Delivered" value={deliveredCount} accent={C.green} />
+        <KpiHero index={2} label="Total order value" value={rupees(totalOrderValue)} accent={VIZ.teal} />
+        <KpiHero index={3} label="Below reorder" value={belowReorder.length} accent={C.amber} />
+      </div>
+
+      <div style={{ padding: '26px 26px 0' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
+          <Panel delayMs={0}>
+            <PanelTitle>Status lifecycle</PanelTitle>
+            <div style={{ padding: 18 }}>
+              {lifecycleBars.length === 0 ? (
+                <EmptyState title="No orders placed yet" height={140} />
+              ) : (
+                <ColumnChart bars={lifecycleBars} height={110} barMax={70} />
+              )}
+            </div>
+          </Panel>
+
+          <Panel delayMs={40}>
+            <PanelTitle>Requested vs approved</PanelTitle>
+            <div style={{ padding: 18 }}>
+              {requestedVsApproved.length === 0 ? (
+                <EmptyState title="No orders to compare yet" height={140} />
+              ) : (
+                <GroupedBarChart data={requestedVsApproved} seriesNames={['Requested', 'Approved']} colors={[VIZ.slate, VIZ.teal]} height={150} />
+              )}
+            </div>
+          </Panel>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 340px', gap: 24, padding: '0 26px 52px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <div
             style={{
@@ -158,10 +243,10 @@ export default function Orders() {
           </div>
           {placeMsg && <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkMuted }}>{placeMsg}</div>}
 
-          <Card style={{ animation: rise(60), overflow: 'hidden' }}>
-            <CardTitle>Placed orders</CardTitle>
+          <Panel delayMs={60} style={{ overflow: 'hidden' }}>
+            <PanelTitle>Placed orders</PanelTitle>
             {orders.length === 0 ? (
-              <Empty>No supply orders placed yet.</Empty>
+              <EmptyState title="No supply orders placed yet" height={180} />
             ) : (
               <div>
                 {orders.map((o, i) => {
@@ -221,18 +306,18 @@ export default function Orders() {
               Sync shows whether our outbound order notification actually reached the manufacturer&rsquo;s system —
               it is not the same thing as the order&rsquo;s own delivery status.
             </div>
-          </Card>
+          </Panel>
         </div>
 
         <aside style={{ display: 'flex', flexDirection: 'column', gap: 24, alignSelf: 'start' }}>
-          <Card style={{ animation: rise(60) }}>
-            <CardTitle>Draft · reorder</CardTitle>
+          <Panel delayMs={60}>
+            <PanelTitle>Draft · reorder</PanelTitle>
             <div style={{ padding: 20 }}>
               <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint }}>
                 Quantities suggested by the Nidana forecast
               </div>
               {belowReorder.length === 0 ? (
-                <Empty>Nothing below reorder point.</Empty>
+                <EmptyState title="Nothing below reorder point" height={100} glyph="✓" tone={C.green} />
               ) : (
                 belowReorder.slice(0, 6).map((r) => {
                   const needed = Math.max(0, r.reorderPoint - r.qtyOnHand);
@@ -281,10 +366,10 @@ export default function Orders() {
                 {placing ? 'Placing…' : 'Place order'}
               </button>
             </div>
-          </Card>
+          </Panel>
 
-          <Card style={{ animation: rise(120), borderLeft: `2px solid ${C.ink}` }}>
-            <CardTitle>Nidana · why these quantities</CardTitle>
+          <Panel delayMs={120} style={{ borderLeft: `2px solid ${C.ink}` }}>
+            <PanelTitle>Nidana · why these quantities</PanelTitle>
             <div style={{ padding: 20 }}>
               <div style={{ font: `400 14px/1.8 ${FONT}`, color: C.inkMuted }}>
                 {thinnest
@@ -308,7 +393,7 @@ export default function Orders() {
                 </div>
               </div>
             </div>
-          </Card>
+          </Panel>
         </aside>
       </div>
     </>

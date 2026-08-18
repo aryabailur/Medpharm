@@ -18,7 +18,7 @@ import {
   type ResolvedBatch,
 } from '../../lib/api';
 import { C, EASE, FONT, MONO, num, rise } from '../../lib/theme';
-import { ApiError, Button, Card, CardTitle, Empty, PageHeader } from '../../components/ui';
+import { ApiError, Button, EmptyState, PageHeader, Panel, PanelTitle } from '../../components/ui';
 import BarcodeScanner from '../../components/BarcodeScanner';
 
 const inputStyle = {
@@ -182,10 +182,10 @@ export default function ScanIn() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,0.9fr) minmax(0,1.1fr)', gap: 24, padding: '26px 26px 52px' }}>
         {/* LEFT — scan */}
-        <Card style={{ animation: rise(0) }}>
-          <CardTitle right={<span style={{ font: `400 11px/1 ${MONO}`, color: C.inkFaint }}>camera ready</span>}>
+        <Panel delayMs={0}>
+          <PanelTitle right={<span style={{ font: `400 11px/1 ${MONO}`, color: C.inkFaint }}>camera ready</span>}>
             Scan a batch QR
-          </CardTitle>
+          </PanelTitle>
           <div style={{ padding: 18 }}>
             <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkFaint }}>
               Batch, shipment and expected quantity arrive pre-linked. Nothing typed by hand.
@@ -218,7 +218,7 @@ export default function ScanIn() {
             )}
             {notFound && (
               <div style={{ marginTop: 12 }}>
-                <Empty>No batch matching &ldquo;{notFound}&rdquo; on any manifest received here.</Empty>
+                <EmptyState title={`No batch matching "${notFound}"`} hint="Nothing on any manifest received here matches this value." height={120} />
               </div>
             )}
 
@@ -237,11 +237,11 @@ export default function ScanIn() {
               </div>
             </div>
           </div>
-        </Card>
+        </Panel>
 
         {/* RIGHT — confirm before commit */}
-        <Card style={{ animation: rise(60) }}>
-          <CardTitle
+        <Panel delayMs={60}>
+          <PanelTitle
             right={
               <span
                 style={{
@@ -259,10 +259,10 @@ export default function ScanIn() {
             }
           >
             Confirm before commit
-          </CardTitle>
+          </PanelTitle>
 
           {!batch ? (
-            <Empty>Scan a batch to review before it commits.</Empty>
+            <EmptyState title="Scan a batch to review before it commits" height={220} />
           ) : (
             <div>
               {rows.map((r) => (
@@ -382,7 +382,7 @@ export default function ScanIn() {
               </div>
             </div>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );

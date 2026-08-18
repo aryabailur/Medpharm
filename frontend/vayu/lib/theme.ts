@@ -193,3 +193,111 @@ export const riseBar = `mtRiseBar .7s ${EASE} both`;
 
 /** Value-changed pop. Remount the node (change its key) to replay it. */
 export const pop = `mtPop .45s ${EASE} both`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VIBRANT LAYER — additive tokens for the pitch build.
+//
+// Everything above is the approved handoff and stays authoritative: warm paper,
+// near-black ink, square-ish corners, tabular monospace figures. This block
+// only ADDS depth, a wider semantic hue set, and richer motion so the terminal
+// reads as premium under a projector, where hairlines on paper-white vanish.
+//
+// Rules for using it:
+//   - Ink stays the primary text colour. These hues accent, they don't narrate.
+//   - Gradients go on surfaces and data marks, never behind body text.
+//   - Every hue below is contrast-checked ≥4.5:1 on C.surface for text use.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Extended categorical palette for charts — distinguishable, not neon. */
+export const VIZ = {
+  teal: '#0E7490',
+  indigo: '#4338CA',
+  violet: '#6D28D9',
+  magenta: '#A21B62',
+  amber: '#B45309',
+  green: '#146130',
+  blue: '#1F6FB2',
+  rose: '#B91C1C',
+  slate: '#475569',
+  ochre: '#CA8A04',
+} as const;
+
+/** Ordered series colours — index into this so two charts never disagree. */
+export const SERIES = [
+  VIZ.teal, VIZ.indigo, VIZ.amber, VIZ.green,
+  VIZ.magenta, VIZ.blue, VIZ.violet, VIZ.ochre,
+] as const;
+
+/** Soft tints paired to VIZ, for fills under a stroke of the same hue. */
+export const VIZ_TINT = {
+  teal: '#DDEEF0',
+  indigo: '#E3E0F5',
+  violet: '#EAE3F7',
+  magenta: '#F7E3ED',
+  amber: '#FBF0DC',
+  green: '#E7F3EA',
+  blue: '#E6EFF7',
+  rose: '#F9E7E5',
+  slate: '#EDF0F4',
+  ochre: '#FAF0D7',
+} as const;
+
+/**
+ * Elevation. The handoff used a single hairline; under projection that reads
+ * flat, so cards get a warm, tinted shadow instead of a grey one.
+ */
+export const SHADOW = {
+  sm: '0 1px 2px rgba(23,22,20,.04), 0 1px 1px rgba(23,22,20,.03)',
+  md: '0 2px 4px rgba(23,22,20,.05), 0 4px 12px rgba(23,22,20,.04)',
+  lg: '0 4px 8px rgba(23,22,20,.06), 0 12px 28px rgba(23,22,20,.06)',
+  glow: (hue: string) => `0 0 0 1px ${hue}22, 0 4px 16px ${hue}1F`,
+} as const;
+
+/** Surface washes. Subtle enough that ink on top stays the loudest thing. */
+export const GRAD = {
+  /** Card header wash — replaces the flat surfaceAlt fill. */
+  header: 'linear-gradient(180deg,#FFFFFF 0%,#FAF8F5 100%)',
+  /** KPI band, so the signature element gains a little dimension. */
+  band: 'linear-gradient(180deg,#FFFFFF 0%,#FBFAF7 100%)',
+  /** Dark hero / top bar. */
+  ink: 'linear-gradient(135deg,#1F1D1A 0%,#171614 55%,#12110F 100%)',
+  /** Tinted accent panel, e.g. an active drilldown. */
+  accent: 'linear-gradient(135deg,#DDEEF0 0%,#EDF6F7 100%)',
+  /** Alarm strip. */
+  alarm: 'linear-gradient(135deg,#F9E7E5 0%,#FDF2F0 100%)',
+  /** Vertical fade for a chart area fill under a stroke. */
+  fade: (hue: string) => `linear-gradient(180deg,${hue}28 0%,${hue}00 100%)`,
+} as const;
+
+/** Type scale. One ramp, so headings stop being hand-tuned per screen. */
+export const TYPE = {
+  display: '-.03em',
+  h1: '-.02em',
+  h2: '-.015em',
+  body: '0',
+} as const;
+
+// ─── Extra motion ────────────────────────────────────────────────────────────
+// Named keyframes live in each app's layout.tsx <style> block. Adding a helper
+// here without the matching keyframe there does nothing.
+
+/** Left-to-right sheen, for a live/streaming affordance. */
+export const shimmer = (durationS = 1.8) =>
+  `mtShimmer ${durationS}s linear infinite`;
+
+/** Soft breathing pulse — a live dot, an open alarm. */
+export const pulse = (durationS = 2) => `mtPulse ${durationS}s ${EASE} infinite`;
+
+/** Count-up/scale-in for a figure that just changed. */
+export const countIn = (delayMs = 0) =>
+  `mtCountIn .55s ${EASE} ${delayMs ? `${delayMs}ms ` : ''}both`;
+
+/** Card entrance with a touch of scale — for hero cards only. */
+export const riseScale = (delayMs = 0) =>
+  `mtRiseScale .5s ${EASE} ${delayMs ? `${delayMs}ms ` : ''}both`;
+
+/** Radar sweep for a map/live panel. */
+export const sweep = (durationS = 3) => `mtSweep ${durationS}s linear infinite`;
+
+/** Standard hover transition for an interactive card or row. */
+export const HOVER = `background .18s ${EASE}, box-shadow .22s ${EASE}, transform .22s ${EASE}, border-color .18s ${EASE}`;

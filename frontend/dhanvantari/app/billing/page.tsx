@@ -14,16 +14,9 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getDispenses, getInventory, type Dispense, type InventoryRow } from '../../lib/api';
-import { C, FONT, MONO, rise, rupees } from '../../lib/theme';
-import { AreaSparkline } from '../../components/charts';
-import { ApiError, Card, CardTitle, Empty, PageHeader, Pill } from '../../components/ui';
-
-const LABEL_SM = {
-  font: `600 11px/1 ${FONT}`,
-  letterSpacing: '.17em',
-  textTransform: 'uppercase' as const,
-  color: C.inkFaint,
-};
+import { C, FONT, MONO, rupees, VIZ } from '../../lib/theme';
+import { AreaSparkline, PieChart } from '../../components/charts';
+import { ApiError, EmptyState, KpiHero, PageHeader, Panel, PanelTitle, Pill } from '../../components/ui';
 
 export default function Billing() {
   const [dispenses, setDispenses] = useState<Dispense[]>([]);
@@ -99,66 +92,91 @@ export default function Billing() {
     .sort((a, b) => new Date(b.dispensedAt).getTime() - new Date(a.dispensedAt).getTime())
     .slice(0, 40);
 
+  // Settled composition, by ₹ value — scheme-covered vs patient-paid. Unbilled
+  // lines are a count, not a rupee amount, so they get their own KPI rather
+  // than being mixed into a currency-valued chart.
+  const billingComposition = [
+    { label: 'Scheme covered', value: Math.round(schemeCovered), color: VIZ.violet },
+    { label: 'Patient paid', value: Math.round(patientPaid), color: VIZ.teal },
+  ].filter((s) => s.value > 0);
+
   return (
     <>
       <PageHeader title="Billing" />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', background: C.surface, borderBottom: `1px solid ${C.border}` }}>
-        <div style={{ padding: '24px 26px', borderRight: `1px solid ${C.borderFaint}` }}>
-          <div style={LABEL_SM}>Billed today</div>
-          <div style={{ font: `600 32px/1 ${MONO}`, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums', color: C.ink, marginTop: 12 }}>
-            {rupees(billedToday)}
-          </div>
-          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>
-            {todays.length} dispensing lines today
-          </div>
-        </div>
-        <div style={{ padding: '24px 26px', borderRight: `1px solid ${C.borderFaint}` }}>
-          <div style={LABEL_SM}>Scheme covered</div>
-          <div style={{ font: `600 32px/1 ${MONO}`, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums', color: C.ink, marginTop: 12 }}>
-            {billedToday > 0 ? `${Math.round((schemeCovered / billedToday) * 100)}%` : '—'}
-          </div>
-          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>{rupees(schemeCovered)} today</div>
-        </div>
-        <div style={{ padding: '24px 26px', borderRight: `1px solid ${C.borderFaint}` }}>
-          <div style={LABEL_SM}>Patient paid</div>
-          <div style={{ font: `600 32px/1 ${MONO}`, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums', color: C.ink, marginTop: 12 }}>
-            {rupees(patientPaid)}
-          </div>
-          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>Cash and UPI combined</div>
-        </div>
-        <div style={{ padding: '24px 26px', borderRight: `1px solid ${C.borderFaint}` }}>
-          <div style={LABEL_SM}>Unbilled lines</div>
-          <div style={{ font: `600 32px/1 ${MONO}`, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums', color: C.ink, marginTop: 12 }}>
-            {unbilledLines}
-          </div>
-          <div style={{ font: `400 12px/1.7 ${FONT}`, color: C.inkFaint, marginTop: 8 }}>No recorded unit price</div>
-        </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <KpiHero index={0} label="Billed today" value={rupees(billedToday)} sub={`${todays.length} dispensing lines today`} accent={VIZ.violet} />
+        <KpiHero
+          index={1}
+          label="Scheme covered"
+          value={billedToday > 0 ? `${Math.round((schemeCovered / billedToday) * 100)}%` : '—'}
+          sub={`${rupees(schemeCovered)} today`}
+          accent={VIZ.magenta}
+        />
+        <KpiHero index={2} label="Patient paid" value={rupees(patientPaid)} sub="Cash and UPI combined" accent={VIZ.teal} />
+        <KpiHero index={3} label="Unbilled lines" value={unbilledLines} sub="No recorded unit price" accent={C.grey} />
       </div>
 
       <div style={{ padding: '26px 26px 52px', display: 'grid', gap: 24 }}>
         {error && <ApiError error={error} />}
 
-        <Card style={{ animation: rise(0) }}>
-          <CardTitle>Billed value, last 14 days</CardTitle>
-          <div style={{ padding: 20 }}>
-            {trendValues.every((v) => v === 0) ? (
-              <Empty>No billable dispenses yet.</Empty>
-            ) : (
-              <AreaSparkline
-                values={trendValues}
-                ticks={[days[0].key, days[Math.floor(days.length / 2)].key, days[days.length - 1].key].map((k) =>
-                  new Date(k).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase(),
-                )}
-              />
-            )}
-          </div>
-        </Card>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 24 }}>
+          <Panel delayMs={0}>
+            <PanelTitle>Billed value, last 14 days</PanelTitle>
+            <div style={{ padding: 20 }}>
+              {trendValues.every((v) => v === 0) ? (
+                <EmptyState title="No billable dispenses yet" height={104} />
+              ) : (
+                <AreaSparkline
+                  values={trendValues}
+                  color={VIZ.teal}
+                  ticks={[days[0].key, days[Math.floor(days.length / 2)].key, days[days.length - 1].key].map((k) =>
+                    new Date(k).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase(),
+                  )}
+                />
+              )}
+            </div>
+          </Panel>
 
-        <Card style={{ animation: rise(60), overflow: 'hidden' }}>
-          <CardTitle>Bills raised over dispensing records</CardTitle>
+          <Panel delayMs={40}>
+            <PanelTitle>Settled composition</PanelTitle>
+            <div style={{ padding: '20px 18px', display: 'flex', gap: 18, alignItems: 'center' }}>
+              {billingComposition.length === 0 ? (
+                <EmptyState title="No billing data yet" height={104} />
+              ) : (
+                <>
+                  <PieChart
+                    data={billingComposition}
+                    size={100}
+                    centre={rupees(billingComposition.reduce((a, s) => a + s.value, 0))}
+                  />
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {billingComposition.map((s) => (
+                      <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 4, background: s.color, flexShrink: 0 }} />
+                        <span style={{ font: `500 11px/1.3 ${FONT}`, color: C.inkMuted }}>
+                          {s.label} <span style={{ font: `500 11px/1.3 ${MONO}`, color: C.ink }}>{rupees(s.value)}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </Panel>
+        </div>
+
+        <Panel delayMs={60} style={{ overflow: 'hidden' }}>
+          <PanelTitle>Bills raised over dispensing records</PanelTitle>
           {recent.length === 0 ? (
-            <Empty>No dispenses recorded yet.</Empty>
+            <EmptyState title="No dispenses recorded yet" height={180} />
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
@@ -264,7 +282,7 @@ export default function Billing() {
               totals above rather than being treated as zero.
             </div>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );

@@ -12,8 +12,8 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { getIncoming, streamShipment, type IncomingShipment } from '../../lib/api';
-import { C, FONT, MONO, rise } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Mono, PageHeader, Pill, Table, Td } from '../../components/ui';
+import { C, FONT, MONO, VIZ } from '../../lib/theme';
+import { ApiError, EmptyState, LiveChip, Mono, PageHeader, Panel, PanelTitle, Pill, Table, Td } from '../../components/ui';
 import { ColumnChart, Legend, RouteMap, StepRail, TemperatureChart } from '../../components/charts';
 
 const MIN_C = 2;
@@ -302,13 +302,13 @@ function Inner() {
 
       <div style={{ display: 'flex' }}>
         <div style={{ width: 220, flex: '0 0 220px', borderRight: `1px solid ${C.border}`, overflowY: 'auto' }}>
-          <CardTitle>Shipments</CardTitle>
+          <PanelTitle>Shipments</PanelTitle>
           {listError ? (
             <div style={{ padding: 14 }}>
               <ApiError error={listError} service="dhanvantari-api" />
             </div>
           ) : sorted.length === 0 ? (
-            <Empty>No shipments.</Empty>
+            <EmptyState title="No shipments" height={140} />
           ) : (
             <div>
               {sorted.map((s) => {
@@ -347,7 +347,7 @@ function Inner() {
         <div style={{ flex: 1, minWidth: 0 }}>
           {!selectedId || !detail ? (
             <div style={{ padding: 26 }}>
-              <Empty>Select a shipment.</Empty>
+              <EmptyState title="Select a shipment" hint="Pick a shipment from the list to see its live route, temperature and custody chain." height={200} />
             </div>
           ) : (
             <>
@@ -360,27 +360,31 @@ function Inner() {
                   padding: '26px 26px 0',
                 }}
               >
-                <Card style={{ overflow: 'hidden', animation: rise(0) }}>
-                  <CardTitle
+                <Panel delayMs={0} style={{ overflow: 'hidden' }}>
+                  <PanelTitle
+                    dot={detail.anomalyFlag || excursion ? C.amber : C.green}
                     right={
-                      detail.anomalyFlag || excursion ? (
-                        <span
-                          style={{
-                            font: `600 10px/1 ${FONT}`,
-                            letterSpacing: '.06em',
-                            background: C.amberTint,
-                            color: C.amber,
-                            padding: '3px 7px',
-                            borderRadius: 3,
-                          }}
-                        >
-                          EXCURSION
-                        </span>
-                      ) : null
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {live && <LiveChip label="live" color={VIZ.violet} />}
+                        {(detail.anomalyFlag || excursion) && (
+                          <span
+                            style={{
+                              font: `600 10px/1 ${FONT}`,
+                              letterSpacing: '.06em',
+                              background: C.amberTint,
+                              color: C.amber,
+                              padding: '3px 7px',
+                              borderRadius: 3,
+                            }}
+                          >
+                            EXCURSION
+                          </span>
+                        )}
+                      </div>
                     }
                   >
                     {detail.id.slice(0, 12)} · inbound
-                  </CardTitle>
+                  </PanelTitle>
                   <RouteMap
                     progress={detail.progressPct ?? 0}
                     origin="ORIGIN"
@@ -404,10 +408,10 @@ function Inner() {
                       },
                     ]}
                   />
-                </Card>
+                </Panel>
 
-                <Card style={{ animation: rise(60) }}>
-                  <CardTitle
+                <Panel delayMs={60}>
+                  <PanelTitle
                     right={
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
@@ -434,17 +438,18 @@ function Inner() {
                     }
                   >
                     Status
-                  </CardTitle>
+                  </PanelTitle>
                   <div style={{ padding: '20px 20px 6px' }}>
-                    {steps.length === 0 ? <Empty>No lifecycle data.</Empty> : <StepRail steps={steps} />}
+                    {steps.length === 0 ? <EmptyState title="No lifecycle data" height={120} /> : <StepRail steps={steps} />}
                   </div>
-                </Card>
+                </Panel>
               </div>
 
               {/* Block 2: temperature */}
               <div style={{ padding: '26px 26px 0' }}>
-                <Card style={{ animation: rise(100) }}>
-                  <CardTitle
+                <Panel delayMs={100}>
+                  <PanelTitle
+                    dot={bands.length > 0 ? C.red : C.green}
                     right={
                       <Legend
                         items={[
@@ -456,11 +461,15 @@ function Inner() {
                     }
                   >
                     Temperature · 2–8 °C band
-                  </CardTitle>
+                  </PanelTitle>
                   <div style={{ padding: 20 }}>
-                    <TemperatureChart readings={points} minC={MIN_C} maxC={MAX_C} bands={bands} ticks={ticks} />
+                    {points.length === 0 ? (
+                      <EmptyState title="Waiting for the first telemetry reading" hint="Temperature updates arrive live over SSE as the shipment moves." height={180} />
+                    ) : (
+                      <TemperatureChart readings={points} minC={MIN_C} maxC={MAX_C} bands={bands} ticks={ticks} />
+                    )}
                   </div>
-                </Card>
+                </Panel>
               </div>
 
               {/* Block 3: excursion history + by severity */}
@@ -472,10 +481,10 @@ function Inner() {
                   padding: '26px 26px 52px',
                 }}
               >
-                <Card>
-                  <CardTitle>Excursion history</CardTitle>
+                <Panel delayMs={120}>
+                  <PanelTitle>Excursion history</PanelTitle>
                   {excursionHistoryRows.length === 0 ? (
-                    <Empty>No excursions recorded for this shipment.</Empty>
+                    <EmptyState title="No excursions recorded for this shipment" height={140} glyph="✓" tone={C.green} />
                   ) : (
                     <Table head={['Shipment', 'Window', 'Peak', 'Duration', 'Severity', 'Outcome']}>
                       {excursionHistoryRows.map((r, i) => (
@@ -496,10 +505,10 @@ function Inner() {
                       ))}
                     </Table>
                   )}
-                </Card>
+                </Panel>
 
-                <Card style={{ alignSelf: 'start' }}>
-                  <CardTitle>By severity</CardTitle>
+                <Panel delayMs={140} style={{ alignSelf: 'start' }}>
+                  <PanelTitle>By severity</PanelTitle>
                   <div style={{ padding: 18 }}>
                     <ColumnChart
                       bars={[
@@ -510,7 +519,7 @@ function Inner() {
                       footnote="Counted from excursion events observed live on this shipment's stream."
                     />
                   </div>
-                </Card>
+                </Panel>
               </div>
             </>
           )}

@@ -7,9 +7,9 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getExpiring, type InventoryRow } from '../../lib/api';
-import { C, FONT, MONO, rupees } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Table, Td } from '../../components/ui';
-import { BarChart, PieChart } from '../../components/charts';
+import { C, FONT, MONO, rupees, VIZ } from '../../lib/theme';
+import { ApiError, EmptyState, KpiHero, Mono, PageHeader, Panel, PanelTitle, Table, Td } from '../../components/ui';
+import { BarChart, ColumnChart, PieChart } from '../../components/charts';
 
 export default function Expiring() {
   const [data, setData] = useState<{ items: InventoryRow[]; valueAtRisk: number } | null>(null);
@@ -56,27 +56,53 @@ export default function Expiring() {
     ];
   }, [items]);
 
+  // Expiry-horizon buckets by COUNT (not just value) — a chart-led view of
+  // how many line items fall in each window, requested for this screen.
+  const countBuckets = [
+    { label: 'Expired', count: expired, color: C.red },
+    { label: '≤30d', count: inside30, color: C.amber },
+    { label: '31-90d', count: inside90 - inside30, color: VIZ.teal },
+  ];
+
   return (
     <>
       <PageHeader title="Expiring Stock" />
 
-      <KpiBand columns={4}>
-        <Kpi label="Inside 90 days" value={inside90} />
-        <Kpi label="Value at risk" value={rupees(data?.valueAtRisk ?? 0)} deltaColor={C.amber} />
-        <Kpi label="Inside 30 days" value={inside30} deltaColor={C.red} />
-        <Kpi label="Already expired" value={expired} deltaColor={C.red} />
-      </KpiBand>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <KpiHero index={0} label="Inside 90 days" value={inside90} accent={VIZ.teal} />
+        <KpiHero index={1} label="Value at risk" value={rupees(data?.valueAtRisk ?? 0)} accent={C.amber} />
+        <KpiHero index={2} label="Inside 30 days" value={inside30} accent={C.red} />
+        <KpiHero index={3} label="Already expired" value={expired} accent={C.red} />
+      </div>
 
       <div style={{ padding: 26, display: 'grid', gap: 18 }}>
         {error && <ApiError error={error} />}
 
-        <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-          <CardTitle>Value at risk by window</CardTitle>
-          <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 28, alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+          <Panel delayMs={0}>
+            <PanelTitle>Expiry horizon · line items</PanelTitle>
+            <div style={{ padding: 18 }}>
+              {countBuckets.every((b) => b.count === 0) ? (
+                <EmptyState title="Nothing expiring" height={140} glyph="✓" tone={C.green} />
+              ) : (
+                <ColumnChart bars={countBuckets} height={110} barMax={70} />
+              )}
+            </div>
+          </Panel>
+
+          <Panel delayMs={40}>
+            <PanelTitle>Value at risk by window</PanelTitle>
+            <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 20, alignItems: 'center' }}>
               <PieChart
                 data={buckets}
-                size={140}
+                size={110}
                 centre={rupees(buckets.reduce((a, b) => a + b.value, 0))}
               />
               <div style={{ display: 'grid', gap: 6 }}>
@@ -101,16 +127,31 @@ export default function Expiring() {
                 ))}
               </div>
             </div>
-            <div style={{ borderLeft: `1px solid ${C.borderSoft}`, paddingLeft: 24 }}>
-              <BarChart data={buckets} horizontal valueFormat={rupees} />
-            </div>
-          </div>
-        </Card>
+          </Panel>
+        </div>
 
-        <Card>
-          <CardTitle>Expiring line items</CardTitle>
+        <Panel delayMs={60}>
+          <PanelTitle>Value at risk · ranked</PanelTitle>
+          <div style={{ padding: 18 }}>
+            <BarChart
+              data={sorted
+                .slice()
+                .sort((a, b) => b.qtyOnHand * (b.drug.unitPrice ?? 0) - a.qtyOnHand * (a.drug.unitPrice ?? 0))
+                .slice(0, 8)
+                .map((r) => ({
+                  label: r.drug.name,
+                  value: r.qtyOnHand * (r.drug.unitPrice ?? 0),
+                  color: r.daysToExpiry != null && r.daysToExpiry <= 30 ? C.red : C.amber,
+                }))}
+              valueFormat={rupees}
+            />
+          </div>
+        </Panel>
+
+        <Panel delayMs={80}>
+          <PanelTitle>Expiring line items</PanelTitle>
           {sorted.length === 0 ? (
-            <Empty>Nothing expiring inside this window.</Empty>
+            <EmptyState title="Nothing expiring inside this window" height={180} />
           ) : (
             <Table head={['Drug', 'Location', 'On hand', 'Expiry', 'Days', 'Value at risk']}>
               {sorted.map((r) => {
@@ -136,7 +177,7 @@ export default function Expiring() {
               })}
             </Table>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );

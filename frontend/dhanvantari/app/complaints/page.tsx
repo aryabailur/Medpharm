@@ -9,11 +9,11 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getComplaints, type LocalComplaint } from '../../lib/api';
-import { C, FONT, MONO } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Pill } from '../../components/ui';
+import { C, FONT, MONO, VIZ } from '../../lib/theme';
+import { ApiError, EmptyState, KpiHero, Mono, PageHeader, Panel, PanelTitle, Pill } from '../../components/ui';
 import { PieChart, BarChart } from '../../components/charts';
 
-const PALETTE = [C.accent, C.amber, C.red, C.blue, C.green, C.grey];
+const PALETTE = [VIZ.violet, VIZ.amber, VIZ.rose, VIZ.blue, VIZ.green, VIZ.slate];
 
 function fmtDate(d: string): string {
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
@@ -90,19 +90,26 @@ export default function Complaints() {
     <>
       <PageHeader title="Complaints + RCA" />
 
-      <KpiBand columns={4}>
-        <Kpi label="Total filed" value={items.length} />
-        <Kpi label="Open" value={open} deltaColor={C.amber} />
-        <Kpi label="With RCA" value={withRca} deltaColor={C.accent} />
-        <Kpi label="Pending sync" value={pendingSync} deltaColor={C.grey} />
-      </KpiBand>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <KpiHero index={0} label="Total filed" value={items.length} accent={VIZ.violet} />
+        <KpiHero index={1} label="Open" value={open} accent={C.amber} />
+        <KpiHero index={2} label="With RCA" value={withRca} accent={VIZ.teal} />
+        <KpiHero index={3} label="Pending sync" value={pendingSync} accent={C.grey} />
+      </div>
 
       <div style={{ padding: 26, display: 'grid', gap: 18 }}>
         {/* Summary charts row */}
         {items.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-            <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-              <CardTitle>By category</CardTitle>
+            <Panel delayMs={0}>
+              <PanelTitle>By category</PanelTitle>
               <div style={{ padding: 16, display: 'flex', gap: 18, alignItems: 'center' }}>
                 <PieChart data={byCategory} size={130} centre={String(byCategory.reduce((a, d) => a + d.value, 0))} />
                 <div style={{ display: 'grid', gap: 6 }}>
@@ -125,23 +132,23 @@ export default function Complaints() {
                   ))}
                 </div>
               </div>
-            </Card>
+            </Panel>
 
-            <Card>
-              <CardTitle>By status</CardTitle>
+            <Panel delayMs={40}>
+              <PanelTitle>By status</PanelTitle>
               <div style={{ padding: 16 }}>
                 <BarChart data={byStatus} />
               </div>
-            </Card>
+            </Panel>
           </div>
         )}
 
         {/* List / detail split */}
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.4fr)', gap: 24 }}>
-          <Card>
-            <CardTitle>Complaints</CardTitle>
+          <Panel delayMs={60}>
+            <PanelTitle>Complaints</PanelTitle>
             {items.length === 0 ? (
-              <Empty>No complaints filed yet.</Empty>
+              <EmptyState title="No complaints filed yet" height={180} />
             ) : (
               <div>
                 {items.map((c) => {
@@ -174,12 +181,12 @@ export default function Complaints() {
                 })}
               </div>
             )}
-          </Card>
+          </Panel>
 
-          <Card>
-            <CardTitle>Detail</CardTitle>
+          <Panel delayMs={60}>
+            <PanelTitle>Detail</PanelTitle>
             {!selected ? (
-              <Empty>Select a complaint.</Empty>
+              <EmptyState title="Select a complaint" height={160} />
             ) : (
               <div style={{ padding: 16, display: 'grid', gap: 10 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -200,8 +207,8 @@ export default function Complaints() {
                 </div>
 
                 {selected.rcaSummary && (
-                  <Card style={{ marginTop: 8 }}>
-                    <CardTitle>Supplier root cause</CardTitle>
+                  <Panel delayMs={0} style={{ marginTop: 8 }}>
+                    <PanelTitle>Supplier root cause</PanelTitle>
                     <div style={{ padding: 14 }}>
                       <div style={{ font: `400 13px/1.65 ${FONT}`, color: C.ink }}>{selected.rcaSummary}</div>
                       <div style={{ marginTop: 8, font: `400 11px/1.6 ${FONT}`, color: C.inkGhost }}>
@@ -209,11 +216,11 @@ export default function Complaints() {
                         compute it.
                       </div>
                     </div>
-                  </Card>
+                  </Panel>
                 )}
               </div>
             )}
-          </Card>
+          </Panel>
         </div>
       </div>
     </>

@@ -3,6 +3,10 @@
 /**
  * Network Analytics — supply-chain-wide aggregates: consumption, supplier
  * reliability, district fulfilment, stock health, expiry risk, disease signal.
+ *
+ * The widest-angle screen in the product: every panel here draws on the
+ * 88k-row ledger (`/api/analytics/summary`), so this is the best showcase of
+ * the 4-year horizon of real data.
  */
 
 import { useEffect, useState } from 'react';
@@ -25,9 +29,17 @@ import {
   type CriticalStockRow,
   type VendorMetric,
 } from '../../lib/api';
-import { C, FONT, LABEL, MONO, rupees } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Kpi, KpiBand, Mono, PageHeader, Table, Td } from '../../components/ui';
-import { BarChart, Histogram, LineChart, MultiLineChart, PieChart, ScatterPlot } from '../../components/charts';
+import { C, FONT, LABEL, MONO, rise, rupees, SERIES } from '../../lib/theme';
+import { ApiError, EmptyState, KpiHero, PageHeader, Panel, PanelTitle, SkeletonRows, Trend } from '../../components/ui';
+import {
+  BarChart,
+  GaugeArc,
+  GroupedBarChart,
+  LineChart,
+  MultiLineChart,
+  PieChart,
+  ScatterPlot,
+} from '../../components/charts';
 
 /**
  * Section divider — the page reads as three questions in causal order:
@@ -120,7 +132,7 @@ export default function AnalyticsPage() {
       <>
         <PageHeader title="Network Analytics" />
         <div style={{ padding: 26 }}>
-          <Empty>Loading…</Empty>
+          <SkeletonRows rows={8} />
         </div>
       </>
     );
@@ -150,6 +162,13 @@ export default function AnalyticsPage() {
   const worstVendor = vendors.length
     ? vendors.reduce((a, b) => (b.onTimePct < a.onTimePct ? b : a))
     : null;
+  const vendorGrouped = vendors.map((v) => ({
+    label: v.vendorId,
+    values: [v.onTimePct, v.rejectionRatePct],
+  }));
+  const networkOnTimeAvg = vendors.length
+    ? vendors.reduce((a, v) => a + v.onTimePct * v.pos, 0) / vendors.reduce((a, v) => a + v.pos, 0)
+    : 0;
 
   // ── Section 4: district fulfilment ────────────────────────────────────────
   const fulfilmentSorted = [...fulfilment]
@@ -162,6 +181,9 @@ export default function AnalyticsPage() {
   }));
   const worstDistrict = fulfilmentSorted[0];
   const bestDistrict = fulfilmentSorted[fulfilmentSorted.length - 1];
+  const networkFulfilmentAvg = fulfilment.length
+    ? fulfilment.reduce((a, f) => a + (f.fulfilmentPct ?? 0), 0) / fulfilment.length
+    : 0;
 
   // ── Section 6: expiry ──────────────────────────────────────────────────────
   const expiryBars = expiry.map((e) => ({ label: e.label, value: e.valueInr }));
@@ -173,36 +195,59 @@ export default function AnalyticsPage() {
 
   // ── Section 7: disease signal ──────────────────────────────────────────────
   const diseaseSeries = (disease?.series ?? []).map((p) => ({ x: p.month, y: p.cases }));
+  const outbreakMonths = disease?.outbreakMonths ?? 0;
+
+  const belowReorderPct = stockHealth && stockHealth.totalLines > 0
+    ? (stockHealth.belowReorder / stockHealth.totalLines) * 100
+    : 0;
 
   return (
     <>
-      <PageHeader title="Network Analytics" />
+      <PageHeader
+        title="Network Analytics"
+        subtitle="Every panel below draws on the 88k-row ledger — nothing here is estimated."
+      />
 
-      <KpiBand columns={4}>
-        <Kpi
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <KpiHero
+          index={0}
           label="Ledger rows"
           value={summary ? num(summary.ledgerRows) : '—'}
-          note={summary ? `${summary.horizon.from ?? '—'} – ${summary.horizon.to ?? '—'}` : undefined}
+          accent={C.accent}
+          sub={summary ? `${summary.horizon.from ?? '—'} – ${summary.horizon.to ?? '—'}` : undefined}
         />
-        <Kpi
+        <KpiHero
+          index={1}
           label="Institutions"
           value={summary ? summary.institutions : '—'}
-          note={summary ? `${summary.facilities} facilities + ${summary.warehouses} warehouses` : undefined}
+          accent={SERIES[1]}
+          sub={summary ? `${summary.facilities} facilities + ${summary.warehouses} warehouses` : undefined}
         />
-        <Kpi
+        <KpiHero
+          index={2}
           label="Below reorder"
           value={stockHealth ? stockHealth.belowReorder : '—'}
-          deltaColor={stockHealth && stockHealth.belowReorder > 0 ? C.amber : C.grey}
+          accent={C.amber}
+          trend={stockHealth ? <Trend value={Math.round(belowReorderPct)} suffix="%" goodDirection="down" /> : undefined}
+          sub={stockHealth ? `of ${stockHealth.totalLines} lines` : undefined}
         />
-        <Kpi label="Districts" value={summary ? summary.districts : '—'} />
-      </KpiBand>
+        <KpiHero label="Districts" index={3} value={summary ? summary.districts : '—'} accent={SERIES[3]} />
+      </div>
 
       <div style={{ padding: 26, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 20 }}>
         <Section>Demand — what's moving, and why</Section>
 
         {/* Consumption & seasonality */}
-        <Card style={{ gridColumn: '1 / -1', animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
-          <CardTitle
+        <Panel accent={C.accent} delayMs={0} style={{ gridColumn: '1 / -1' }}>
+          <PanelTitle
+            dot={C.accent}
             right={
               <select
                 value={drugId}
@@ -225,12 +270,12 @@ export default function AnalyticsPage() {
             }
           >
             Consumption &amp; Seasonality
-          </CardTitle>
+          </PanelTitle>
           <div style={{ padding: 16 }}>
             {consumptionError ? (
               <ApiError error={consumptionError} />
             ) : !consumption || consumption.series.length === 0 ? (
-              <Empty>No consumption data for this drug.</Empty>
+              <EmptyState title="No consumption data" hint="No consumption series recorded for this drug." />
             ) : (
               <>
                 <MultiLineChart
@@ -257,14 +302,16 @@ export default function AnalyticsPage() {
               </>
             )}
           </div>
-        </Card>
+        </Panel>
 
         {/* Disease signal — the leading indicator behind demand spikes */}
-        <Card style={{ gridColumn: '1 / -1' }}>
-          <CardTitle>Disease Signal</CardTitle>
+        <Panel accent={SERIES[4]} delayMs={40} style={{ gridColumn: '1 / -1' }}>
+          <PanelTitle dot={SERIES[4]} right={outbreakMonths > 0 ? <span style={{ font: `600 11px/1 ${MONO}`, color: C.red }}>{outbreakMonths} outbreak months</span> : undefined}>
+            Disease Signal
+          </PanelTitle>
           <div style={{ padding: 16 }}>
             {diseaseSeries.length === 0 ? (
-              <Empty>No disease signal data.</Empty>
+              <EmptyState title="No disease signal" hint="No disease signal data available." />
             ) : (
               <>
                 <LineChart series={diseaseSeries} color={C.accent} showArea />
@@ -275,65 +322,104 @@ export default function AnalyticsPage() {
               </>
             )}
           </div>
-        </Card>
+        </Panel>
 
         <Section>Supply — is the network keeping up</Section>
 
         {/* Supplier reliability vs price */}
-        <Card style={{ gridColumn: '1 / -1' }}>
-          <CardTitle>Supplier Reliability vs Price</CardTitle>
-          <div style={{ padding: 16 }}>
-            {vendors.length === 0 ? (
-              <Empty>No supplier data.</Empty>
-            ) : (
-              <>
-                <ScatterPlot points={vendorPoints} xLabel="Price variance vs catalogue (%)" yLabel="On-time %" />
-                {bestVendor && worstVendor && (
-                  <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 10 }}>
-                    {bestVendor.name} leads on-time delivery at {bestVendor.onTimePct.toFixed(0)}%, while{' '}
-                    {worstVendor.name} trails at {worstVendor.onTimePct.toFixed(0)}%.
-                  </div>
-                )}
-              </>
-            )}
+        <Panel accent={SERIES[2]} delayMs={0} style={{ gridColumn: '1 / -1' }}>
+          <PanelTitle dot={SERIES[2]}>Supplier Reliability vs Price</PanelTitle>
+          <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 24, alignItems: 'center' }}>
+            <GaugeArc value={Math.round(networkOnTimeAvg)} label="Network on-time" size={160} />
+            <div>
+              {vendors.length === 0 ? (
+                <EmptyState title="No supplier data" hint="No supplier metrics available." />
+              ) : (
+                <>
+                  <ScatterPlot points={vendorPoints} xLabel="Price variance vs catalogue (%)" yLabel="On-time %" />
+                  {bestVendor && worstVendor && (
+                    <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 10 }}>
+                      {bestVendor.name} leads on-time delivery at {bestVendor.onTimePct.toFixed(0)}% over {bestVendor.pos} POs, while{' '}
+                      {worstVendor.name} trails at {worstVendor.onTimePct.toFixed(0)}% over {worstVendor.pos} POs.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
           {vendors.length > 0 && (
-            <Table head={['Supplier', 'On-time %', 'Avg delay', 'Price vs catalogue', 'Rejection %', 'POs']}>
-              {vendors.map((v) => (
-                <tr key={v.vendorId}>
-                  <Td>{v.name}</Td>
-                  <Td>
-                    <Mono color={v.onTimePct >= 90 ? C.green : v.onTimePct >= 60 ? C.amber : C.red}>
-                      {v.onTimePct.toFixed(0)}%
-                    </Mono>
-                  </Td>
-                  <Td>
-                    <Mono>{v.avgDelayDays.toFixed(1)}d</Mono>
-                  </Td>
-                  <Td>
-                    <Mono color={v.priceVariancePct > 0 ? C.red : C.green}>
-                      {v.priceVariancePct > 0 ? '+' : ''}
-                      {v.priceVariancePct.toFixed(1)}%
-                    </Mono>
-                  </Td>
-                  <Td>
-                    <Mono color={v.rejectionRatePct > 5 ? C.red : C.inkMuted}>{v.rejectionRatePct.toFixed(1)}%</Mono>
-                  </Td>
-                  <Td>
-                    <Mono>{v.pos}</Mono>
-                  </Td>
-                </tr>
-              ))}
-            </Table>
+            <div style={{ padding: '0 16px 20px' }}>
+              <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.14em', textTransform: 'uppercase', color: C.inkGhost, marginBottom: 10 }}>
+                On-time % vs rejection %
+              </div>
+              <GroupedBarChart
+                data={vendorGrouped}
+                seriesNames={['On-time %', 'Rejection %']}
+                colors={[C.accent, C.red]}
+                valueFormat={(v) => `${v.toFixed(1)}%`}
+              />
+            </div>
           )}
-        </Card>
+          {vendors.length > 0 && (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  {['Supplier', 'On-time %', 'Avg delay', 'Price vs catalogue', 'Rejection %', 'POs'].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: 'left',
+                        ...LABEL,
+                        padding: '8px 14px',
+                        borderBottom: `1px solid ${C.borderSoft}`,
+                        background: C.surfaceAlt,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {vendors.map((v) => (
+                  <tr key={v.vendorId}>
+                    <td style={tdStyle}>{v.name}</td>
+                    <td style={tdStyle}>
+                      <span style={{ font: `500 12px/1.4 ${MONO}`, color: v.onTimePct >= 90 ? C.green : v.onTimePct >= 60 ? C.amber : C.red }}>
+                        {v.onTimePct.toFixed(0)}%
+                      </span>
+                    </td>
+                    <td style={tdStyle}>
+                      <span style={{ font: `500 12px/1.4 ${MONO}`, color: C.ink }}>{v.avgDelayDays.toFixed(1)}d</span>
+                    </td>
+                    <td style={tdStyle}>
+                      <span style={{ font: `500 12px/1.4 ${MONO}`, color: v.priceVariancePct > 0 ? C.red : C.green }}>
+                        {v.priceVariancePct > 0 ? '+' : ''}
+                        {v.priceVariancePct.toFixed(1)}%
+                      </span>
+                    </td>
+                    <td style={tdStyle}>
+                      <span style={{ font: `500 12px/1.4 ${MONO}`, color: v.rejectionRatePct > 5 ? C.red : C.inkMuted }}>
+                        {v.rejectionRatePct.toFixed(1)}%
+                      </span>
+                    </td>
+                    <td style={tdStyle}>
+                      <span style={{ font: `500 12px/1.4 ${MONO}`, color: C.ink }}>{v.pos}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Panel>
 
         {/* Stock health */}
-        <Card style={{ gridColumn: '1 / -1' }}>
-          <CardTitle>Stock Health</CardTitle>
+        <Panel accent={C.red} delayMs={40} style={{ gridColumn: '1 / -1' }}>
+          <PanelTitle dot={C.red}>Stock Health</PanelTitle>
           <div style={{ padding: 16 }}>
             {!stockHealth || stockHealth.buckets.length === 0 ? (
-              <Empty>No stock data.</Empty>
+              <EmptyState title="No stock data" hint="No stock health data available." />
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 28, alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -341,7 +427,7 @@ export default function AnalyticsPage() {
                     data={stockHealth.buckets.map((b, i) => ({
                       label: b.label,
                       value: b.count,
-                      color: [C.red, C.amber, C.accent, C.green, C.grey][i % 5],
+                      color: SERIES[i % SERIES.length],
                     }))}
                     size={130}
                     centre={num(stockHealth.buckets.reduce((a, b) => a + b.count, 0))}
@@ -354,7 +440,7 @@ export default function AnalyticsPage() {
                             width: 8,
                             height: 8,
                             borderRadius: 4,
-                            background: [C.red, C.amber, C.accent, C.green, C.grey][i % 5],
+                            background: SERIES[i % SERIES.length],
                             flexShrink: 0,
                           }}
                         />
@@ -369,38 +455,82 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
                 <div style={{ borderLeft: `1px solid ${C.borderSoft}`, paddingLeft: 24 }}>
-                  <Histogram buckets={stockHealth.buckets} />
+                  <BarChart
+                    data={stockHealth.buckets.map((b, i) => ({ label: b.label, value: b.count, color: SERIES[i % SERIES.length] }))}
+                  />
                 </div>
               </div>
             )}
           </div>
           {stockHealth && stockHealth.critical.length > 0 && (
-            <Table head={['Drug', 'Institution', 'District', 'Months of stock']}>
-              {stockHealth.critical.slice(0, 10).map((row, i) => (
-                <tr key={i}>
-                  <Td>{row.drug}</Td>
-                  <Td>{row.institution}</Td>
-                  <Td>{row.district ?? '—'}</Td>
-                  <Td>
-                    <Mono color={C.red}>{row.monthsOfStock != null ? row.monthsOfStock.toFixed(1) : '—'}</Mono>
-                  </Td>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  {['Drug', 'ABC', 'Institution', 'District', 'Months of stock'].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: 'left',
+                        ...LABEL,
+                        padding: '8px 14px',
+                        borderBottom: `1px solid ${C.borderSoft}`,
+                        background: C.surfaceAlt,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </Table>
+              </thead>
+              <tbody>
+                {stockHealth.critical.slice(0, 10).map((row, i) => (
+                  <tr key={i}>
+                    <td style={tdStyle}>{row.drug}</td>
+                    <td style={tdStyle}>
+                      {row.abcClass ? (
+                        <span
+                          style={{
+                            font: `600 10px/1.5 ${MONO}`,
+                            padding: '2px 6px',
+                            borderRadius: 3,
+                            background: row.abcClass === 'A' ? C.redTint : row.abcClass === 'B' ? C.amberTint : C.greyTint,
+                            color: row.abcClass === 'A' ? C.red : row.abcClass === 'B' ? C.amber : C.grey,
+                          }}
+                        >
+                          {row.abcClass}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td style={tdStyle}>{row.institution}</td>
+                    <td style={tdStyle}>{row.district ?? '—'}</td>
+                    <td style={tdStyle}>
+                      <span style={{ font: `500 12px/1.4 ${MONO}`, color: C.red }}>
+                        {row.monthsOfStock != null ? row.monthsOfStock.toFixed(1) : '—'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
-        </Card>
+        </Panel>
 
         <Section>Gaps — where that shortfall lands</Section>
 
         {/* District fulfilment — geographic gap */}
-        <Card>
-          <CardTitle>District Fulfilment</CardTitle>
+        <Panel accent={C.amber} delayMs={0}>
+          <PanelTitle dot={C.amber} right={<GaugeArcInline value={networkFulfilmentAvg} />}>
+            District Fulfilment
+          </PanelTitle>
           <div style={{ padding: 16 }}>
             {fulfilmentBars.length === 0 ? (
-              <Empty>No fulfilment data.</Empty>
+              <EmptyState title="No fulfilment data" hint="No district fulfilment data available." />
             ) : (
               <>
-                <BarChart data={fulfilmentBars} horizontal valueFormat={(v) => `${v}%`} />
+                <BarChart data={fulfilmentBars} valueFormat={(v) => `${v}%`} />
                 {worstDistrict && bestDistrict && (
                   <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 10 }}>
                     {worstDistrict.district} fulfils {(worstDistrict.fulfilmentPct ?? 0).toFixed(0)}% of demand with{' '}
@@ -411,14 +541,14 @@ export default function AnalyticsPage() {
               </>
             )}
           </div>
-        </Card>
+        </Panel>
 
         {/* Expiry risk — the waste gap */}
-        <Card>
-          <CardTitle>Expiry Risk</CardTitle>
+        <Panel accent={C.grey} delayMs={40}>
+          <PanelTitle dot={C.grey}>Expiry Risk</PanelTitle>
           <div style={{ padding: 16 }}>
             {expiryBars.length === 0 ? (
-              <Empty>No expiry data.</Empty>
+              <EmptyState title="No expiry data" hint="No expiry-horizon data available." />
             ) : (
               <>
                 <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginBottom: 14 }}>
@@ -426,7 +556,7 @@ export default function AnalyticsPage() {
                     data={expiry.map((e, i) => ({
                       label: e.label,
                       value: e.valueInr,
-                      color: [C.red, C.amber, C.accent, C.grey][i % 4],
+                      color: SERIES[i % SERIES.length],
                     }))}
                     size={120}
                     centre={rupees(expiry.reduce((a, e) => a + e.valueInr, 0))}
@@ -439,7 +569,7 @@ export default function AnalyticsPage() {
                             width: 8,
                             height: 8,
                             borderRadius: 4,
-                            background: [C.red, C.amber, C.accent, C.grey][i % 4],
+                            background: SERIES[i % SERIES.length],
                             flexShrink: 0,
                           }}
                         />
@@ -461,12 +591,30 @@ export default function AnalyticsPage() {
               </>
             )}
           </div>
-        </Card>
+        </Panel>
       </div>
     </>
+  );
+}
+
+/** Small inline completion ring for a panel header — reuses ProgressRing's math via GaugeArc's smaller sibling. */
+function GaugeArcInline({ value }: { value: number }) {
+  const color = value >= 90 ? C.green : value >= 80 ? C.amber : C.red;
+  return (
+    <span style={{ font: `600 12px/1 ${MONO}`, color }}>
+      {value ? `${value.toFixed(1)}% network avg` : ''}
+    </span>
   );
 }
 
 function num(n: number): string {
   return n.toLocaleString('en-IN');
 }
+
+const tdStyle = {
+  padding: '10px 14px',
+  font: `400 13px/1.45 ${FONT}`,
+  color: C.inkMuted,
+  borderBottom: `1px solid ${C.borderSoft}`,
+  verticalAlign: 'middle' as const,
+};

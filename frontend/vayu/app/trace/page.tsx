@@ -17,8 +17,8 @@ import {
   type Shipment,
   type TelemetryPoint,
 } from '../../lib/api';
-import { C, FONT, MONO, rise } from '../../lib/theme';
-import { Card, CardTitle, Empty } from '../../components/ui';
+import { C, FONT, GRAD, MONO, rise, SHADOW } from '../../lib/theme';
+import { EmptyState, Panel, PanelTitle } from '../../components/ui';
 import { AxisStrip, RouteMap, TemperatureChart } from '../../components/charts';
 
 type ShipmentBatchEntry = {
@@ -161,29 +161,35 @@ export default function Trace() {
   return (
     <>
       {batch && (
-        <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: '22px 26px' }}>
-          <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: C.inkFaint }}>
+        <div style={{ background: GRAD.ink, borderBottom: `1px solid ${C.border}`, padding: '22px 26px', boxShadow: SHADOW.md }}>
+          <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.17em', textTransform: 'uppercase', color: '#B8B4AC' }}>
             Supply chain · {batch.lotNumber}
           </div>
           <div style={{ display: 'flex', alignItems: 'stretch', gap: 0, marginTop: 14, overflowX: 'auto' }}>
             {stages.map((s, i) => (
               <div
                 key={i}
-                style={{ flex: 1, minWidth: 104, borderTop: `2px solid ${stageColor(s.state)}`, padding: '11px 12px 0' }}
+                style={{
+                  flex: 1,
+                  minWidth: 104,
+                  borderTop: `3px solid ${stageColor(s.state)}`,
+                  padding: '11px 12px 0',
+                  animation: rise(i * 60),
+                }}
               >
-                <div style={{ font: `500 9px/1 ${MONO}`, letterSpacing: '.1em', color: C.inkSoft }}>{s.idx}</div>
+                <div style={{ font: `500 9px/1 ${MONO}`, letterSpacing: '.1em', color: '#8B877F' }}>{s.idx}</div>
                 <div
                   style={{
                     font: `600 11px/1.3 ${FONT}`,
                     letterSpacing: '.04em',
                     textTransform: 'uppercase',
-                    color: stageColor(s.state),
+                    color: s.state === 'bad' ? '#F3928C' : s.state === 'warn' ? '#F0C179' : '#F7F6F3',
                     marginTop: 7,
                   }}
                 >
                   {s.label}
                 </div>
-                <div style={{ font: `400 10px/1.4 ${MONO}`, color: C.inkFaint, marginTop: 5 }}>{s.meta}</div>
+                <div style={{ font: `400 10px/1.4 ${MONO}`, color: '#9A968D', marginTop: 5 }}>{s.meta}</div>
               </div>
             ))}
           </div>
@@ -206,7 +212,7 @@ export default function Trace() {
                     flex: 1,
                     border: `1px solid ${C.border}`,
                     borderRadius: 4,
-                    padding: '7px 10px',
+                    padding: '9px 12px',
                     font: `400 13px/1.4 ${FONT}`,
                     color: C.ink,
                     background: C.surface,
@@ -219,13 +225,14 @@ export default function Trace() {
                     border: 0,
                     background: C.ink,
                     color: C.bg,
-                    font: `500 12px/1 ${FONT}`,
-                    padding: '8px 13px',
+                    font: `600 12px/1 ${FONT}`,
+                    padding: '9px 16px',
                     borderRadius: 4,
                     cursor: loading || !query.trim() ? 'not-allowed' : 'pointer',
+                    boxShadow: SHADOW.sm,
                   }}
                 >
-                  Trace
+                  {loading ? 'Tracing…' : 'Trace'}
                 </button>
               </div>
               <div style={{ font: `400 11px/1.5 ${FONT}`, color: C.inkGhost, marginTop: 6 }}>
@@ -234,26 +241,31 @@ export default function Trace() {
             </div>
 
             {error && (
-              <Card style={{ padding: 16, borderColor: '#E4C7C4', background: C.redTint }}>
+              <Panel accent={C.red} style={{ padding: 16, borderColor: '#E4C7C4', background: C.redTint }}>
                 <div style={{ font: `600 12px/1.4 ${FONT}`, color: C.red }}>Cannot reach vayu-api</div>
                 <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkMuted, marginTop: 5 }}>{error}</div>
-              </Card>
+              </Panel>
             )}
 
             {notFound && (
-              <Card>
-                <Empty>No batch matching &quot;{notFound}&quot;.</Empty>
-              </Card>
+              <Panel>
+                <EmptyState glyph="◇" title="No match" hint={`No batch matching "${notFound}".`} />
+              </Panel>
             )}
 
-            {!error && !notFound && <Empty>Trace a batch to see its custody chain.</Empty>}
+            {!error && !notFound && (
+              <Panel>
+                <EmptyState glyph="⛓" title="Trace a batch" hint="Trace a batch to see its full custody chain — manufacture through complaint." />
+              </Panel>
+            )}
           </div>
         )}
 
         {batch && (
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,0.95fr)', gap: 24 }}>
-            <Card style={{ animation: rise(0) }}>
-              <CardTitle
+            <Panel accent={C.ink} delayMs={0}>
+              <PanelTitle
+                dot={C.ink}
                 right={
                   <button
                     onClick={() => {
@@ -275,7 +287,7 @@ export default function Trace() {
                 }
               >
                 Event spine
-              </CardTitle>
+              </PanelTitle>
               <div style={{ padding: '16px 14px 4px' }}>
                 <EventStep color={C.ink} label="Manufactured" time={fmtDT(batch.mfgDate)} detail={`Lot ${batch.lotNumber}, ${batch.quantity.toLocaleString('en-IN')} units.`} />
                 {qcChronological.map((qc, i) => (
@@ -310,16 +322,21 @@ export default function Trace() {
                   />
                 )}
               </div>
-            </Card>
+            </Panel>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
               {shipment && (
-                <Card style={{ overflow: 'hidden', animation: rise(60) }}>
-                  <CardTitle right={<span style={{ font: `400 11px/1 ${MONO}`, color: C.inkSoft }}>
-                    {Math.round((shipment.progressPct ?? 0) * 100)}% · ETA {fmtClock(shipment.etaAt)}
-                  </span>}>
+                <Panel accent={C.accent} delayMs={60} style={{ overflow: 'hidden' }}>
+                  <PanelTitle
+                    dot={C.accent}
+                    right={
+                      <span style={{ font: `400 11px/1 ${MONO}`, color: C.inkSoft }}>
+                        {Math.round((shipment.progressPct ?? 0) * 100)}% · ETA {fmtClock(shipment.etaAt)}
+                      </span>
+                    }
+                  >
                     Route · {shipment.id.slice(0, 8).toUpperCase()}
-                  </CardTitle>
+                  </PanelTitle>
                   <RouteMap
                     progress={shipment.progressPct ?? 0}
                     origin="ORIGIN"
@@ -328,14 +345,14 @@ export default function Trace() {
                     incident={openExcursion ? `EXCURSION ${fmtClock(openExcursion.startedAt)}` : undefined}
                     height={220}
                   />
-                </Card>
+                </Panel>
               )}
 
-              <Card style={{ animation: rise(100) }}>
-                <CardTitle>Temperature at the breach</CardTitle>
+              <Panel accent={C.amber} delayMs={100}>
+                <PanelTitle dot={C.amber}>Temperature at the breach</PanelTitle>
                 <div style={{ padding: '18px 20px' }}>
                   {tempPoints.length === 0 ? (
-                    <Empty>No temperature telemetry linked to this batch.</Empty>
+                    <EmptyState height={140} title="No telemetry" hint="No temperature telemetry linked to this batch." />
                   ) : (
                     <>
                       <TemperatureChart readings={tempPoints.map((p) => ({ ts: p.ts, tempC: p.tempC }))} bands={bands} height={150} />
@@ -343,10 +360,10 @@ export default function Trace() {
                     </>
                   )}
                 </div>
-              </Card>
+              </Panel>
 
-              <Card style={{ animation: rise(140) }}>
-                <CardTitle>Where it went</CardTitle>
+              <Panel accent={C.green} delayMs={140}>
+                <PanelTitle dot={C.green}>Where it went</PanelTitle>
                 <div style={{ padding: '6px 14px 14px' }}>
                   {traceMeta.map((m) => (
                     <div
@@ -381,7 +398,7 @@ export default function Trace() {
                       : 'No other shipments recorded for this batch.'}
                   </div>
                 </div>
-              </Card>
+              </Panel>
             </div>
           </div>
         )}
@@ -406,7 +423,7 @@ function EventStep({
   return (
     <div style={{ display: 'flex', gap: 14 }}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 10 }}>
-        <span style={{ width: 10, height: 10, background: color, display: 'inline-block' }} />
+        <span style={{ width: 10, height: 10, background: color, display: 'inline-block', boxShadow: `0 0 0 3px ${color}1A` }} />
         {!isLast && <span style={{ width: 1, flex: 1, background: C.border, minHeight: 24 }} />}
       </div>
       <div style={{ paddingBottom: 20, flex: 1 }}>

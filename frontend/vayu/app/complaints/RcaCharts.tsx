@@ -9,11 +9,9 @@
  */
 
 import type { RcaCategoryInsight, RcaChartInsight, RcaInsights, RcaSummary } from '../../lib/api';
-import { C, FONT, LABEL, MONO, statusColors } from '../../lib/theme';
-import { Card, CardTitle, Empty } from '../../components/ui';
-import { BarChart, PieChart } from '../../components/charts';
-
-const PALETTE = [C.accent, C.amber, C.red, C.blue, C.green, C.grey];
+import { C, FONT, MONO, SERIES, rise } from '../../lib/theme';
+import { EmptyState, Panel, PanelTitle, SkeletonRows } from '../../components/ui';
+import { BarChart, ColumnChart, PieChart } from '../../components/charts';
 
 function InsightNote({ children }: { children: React.ReactNode }) {
   return (
@@ -23,7 +21,7 @@ function InsightNote({ children }: { children: React.ReactNode }) {
         color: C.inkMuted,
         padding: '10px 14px',
         background: C.greyTint,
-        borderRadius: 3,
+        borderRadius: 4,
       }}
     >
       {children}
@@ -52,16 +50,18 @@ export function RcaDashboard({
 }) {
   if (loading && !summary) {
     return (
-      <Card>
-        <Empty>Loading root-cause dashboard…</Empty>
-      </Card>
+      <Panel accent={C.accent}>
+        <PanelTitle dot={C.accent}>Root-cause dashboard</PanelTitle>
+        <SkeletonRows rows={4} />
+      </Panel>
     );
   }
   if (!summary || summary.totalComplaints === 0) {
     return (
-      <Card>
-        <Empty>No complaints yet — nothing to analyse.</Empty>
-      </Card>
+      <Panel accent={C.accent}>
+        <PanelTitle dot={C.accent}>Root-cause dashboard</PanelTitle>
+        <EmptyState title="No complaints yet" hint="Nothing to analyse — the dashboard fills in as complaints are filed." />
+      </Panel>
     );
   }
 
@@ -72,7 +72,9 @@ export function RcaDashboard({
   return (
     <div style={{ display: 'grid', gap: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={LABEL}>Root-cause insight</div>
+        <div style={{ font: `600 11px/1 ${FONT}`, letterSpacing: '.15em', textTransform: 'uppercase', color: C.inkFaint }}>
+          Root-cause insight
+        </div>
         <div style={{ font: `500 10px/1.2 ${MONO}`, color: C.inkGhost }}>
           {insights ? `narration: ${insights.source}` : loading ? 'narrating…' : ''}
         </div>
@@ -80,12 +82,12 @@ export function RcaDashboard({
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         {/* Complaints by category — pie */}
-        <Card>
-          <CardTitle>Complaints by category</CardTitle>
+        <Panel accent={SERIES[0]} delayMs={0} hover>
+          <PanelTitle dot={SERIES[0]}>Complaints by category</PanelTitle>
           <div style={{ padding: 16, display: 'flex', gap: 18, alignItems: 'center' }}>
             <PieChart
               size={140}
-              data={summary.byCategory.map((c, i) => ({ label: c.category, value: c.count, color: PALETTE[i % PALETTE.length] }))}
+              data={summary.byCategory.map((c, i) => ({ label: c.category, value: c.count, color: SERIES[i % SERIES.length] }))}
               centre={String(summary.byCategory.reduce((a, c) => a + c.count, 0))}
             />
           </div>
@@ -99,7 +101,7 @@ export function RcaDashboard({
                       width: 8,
                       height: 8,
                       borderRadius: 4,
-                      background: PALETTE[i % PALETTE.length],
+                      background: SERIES[i % SERIES.length],
                       marginTop: 5,
                       flexShrink: 0,
                     }}
@@ -122,34 +124,37 @@ export function RcaDashboard({
               );
             })}
           </div>
-        </Card>
+        </Panel>
 
         {/* Complaints by assigned team — bar */}
-        <Card style={{ display: 'flex', flexDirection: 'column' }}>
-          <CardTitle>Complaints by assigned team</CardTitle>
+        <Panel accent={SERIES[1]} delayMs={40} hover style={{ display: 'flex', flexDirection: 'column' }}>
+          <PanelTitle dot={SERIES[1]}>Complaints by assigned team</PanelTitle>
           <div style={{ padding: 16 }}>
             <BarChart
-              data={summary.byTeam.map((t, i) => ({ label: t.label, value: t.count, color: PALETTE[i % PALETTE.length] }))}
+              data={summary.byTeam.map((t, i) => ({ label: t.label, value: t.count, color: SERIES[i % SERIES.length] }))}
             />
           </div>
           <div style={{ padding: '0 16px 16px', marginTop: 'auto' }}>
             <ChartInsightBlock insight={insights?.teamInsight} />
           </div>
-        </Card>
+        </Panel>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-        {/* Excursion severity behind complaints — horizontal bar */}
-        <Card style={{ display: 'flex', flexDirection: 'column' }}>
-          <CardTitle>Cold-chain excursions behind complaints</CardTitle>
+        {/* Excursion severity behind complaints — column chart, status colours */}
+        <Panel accent={C.amber} delayMs={80} hover style={{ display: 'flex', flexDirection: 'column' }}>
+          <PanelTitle dot={C.amber}>Cold-chain excursions behind complaints</PanelTitle>
           {summary.excursionSeverity.length === 0 ? (
-            <Empty>No complaint is linked to a temperature excursion.</Empty>
+            <EmptyState glyph="⚠" title="No excursion link" hint="No complaint is linked to a temperature excursion." tone={C.amber} />
           ) : (
             <>
               <div style={{ padding: 16 }}>
-                <BarChart
-                  horizontal
-                  data={summary.excursionSeverity.map((s) => ({ label: s.label, value: s.count, color: statusColors(s.label).color }))}
+                <ColumnChart
+                  bars={summary.excursionSeverity.map((s) => ({
+                    label: s.label,
+                    count: s.count,
+                    color: s.label === 'CRITICAL' ? C.red : s.label === 'MAJOR' ? C.amber : C.grey,
+                  }))}
                 />
               </div>
               <div style={{ padding: '0 16px 16px', marginTop: 'auto' }}>
@@ -157,18 +162,18 @@ export function RcaDashboard({
               </div>
             </>
           )}
-        </Card>
+        </Panel>
 
-        {/* Monthly trend — bar */}
-        <Card style={{ display: 'flex', flexDirection: 'column' }}>
-          <CardTitle>Complaint volume, last 6 months</CardTitle>
+        {/* Monthly trend — column chart */}
+        <Panel accent={C.accent} delayMs={120} hover style={{ display: 'flex', flexDirection: 'column' }}>
+          <PanelTitle dot={C.accent}>Complaint volume, last 6 months</PanelTitle>
           <div style={{ padding: 16 }}>
-            <BarChart data={summary.monthlyTrend.map((t) => ({ label: t.label, value: t.count, color: C.accent }))} />
+            <ColumnChart bars={summary.monthlyTrend.map((t) => ({ label: t.label, count: t.count, color: C.accent }))} />
           </div>
           <div style={{ padding: '0 16px 16px', marginTop: 'auto' }}>
             <ChartInsightBlock insight={insights?.trendInsight} />
           </div>
-        </Card>
+        </Panel>
       </div>
     </div>
   );

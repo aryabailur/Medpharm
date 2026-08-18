@@ -13,7 +13,24 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 
-import { C, FONT, LABEL, MONO, statusColors } from '../lib/theme';
+import {
+  bandColors,
+  C,
+  countIn,
+  FONT,
+  GRAD,
+  HOVER,
+  LABEL,
+  MONO,
+  pulse,
+  rise,
+  riseScale,
+  SHADOW,
+  shimmer,
+  stagger,
+  statusColors,
+  TYPE,
+} from '../lib/theme';
 
 export function PageHeader({
   title,
@@ -304,3 +321,413 @@ export function ApiError({ error, service = 'vayu-api' }: { error: string; servi
  * apart — there is one meter in the product, not two.
  */
 export { Meter } from './charts';
+
+// ===========================================================================
+// VIBRANT LAYER - additive primitives for the pitch build.
+//
+// The primitives above stay as the approved handoff drew them. These add depth,
+// hover affordance and richer empty/loading states, because a blank hairline
+// box reads as "broken" on a projector and several screens legitimately have
+// no rows yet.
+// ===========================================================================
+
+/**
+ * Elevated card. Same square-ish geometry as `Card`, plus a warm shadow, an
+ * optional accent hairline along the top edge, and an entrance animation.
+ */
+export function Panel({
+  children,
+  style,
+  accent,
+  delayMs = 0,
+  hover = false,
+}: {
+  children: ReactNode;
+  style?: CSSProperties;
+  /** Draws a 2px accent rule along the top edge. */
+  accent?: string;
+  delayMs?: number;
+  hover?: boolean;
+}) {
+  return (
+    <div
+      className={hover ? 'mt-panel-hover' : undefined}
+      style={{
+        position: 'relative',
+        background: C.surface,
+        border: `1px solid ${C.border}`,
+        borderRadius: 6,
+        boxShadow: SHADOW.sm,
+        animation: riseScale(delayMs),
+        transition: HOVER,
+        ...style,
+      }}
+    >
+      {accent && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 2,
+            background: `linear-gradient(90deg,${accent} 0%,${accent}44 100%)`,
+            borderRadius: '6px 6px 0 0',
+          }}
+        />
+      )}
+      {children}
+    </div>
+  );
+}
+
+/** Panel header - gradient wash, optional status dot, label, and right slot. */
+export function PanelTitle({
+  children,
+  right,
+  dot,
+}: {
+  children: ReactNode;
+  right?: ReactNode;
+  /** Small status dot in this colour, left of the label. */
+  dot?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '13px 16px',
+        borderBottom: `1px solid ${C.borderSoft}`,
+        background: GRAD.header,
+        borderRadius: '6px 6px 0 0',
+      }}
+    >
+      {dot && (
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: dot,
+            boxShadow: `0 0 0 3px ${dot}1F`,
+            flex: '0 0 6px',
+          }}
+        />
+      )}
+      <div style={{ ...LABEL, letterSpacing: '.15em' }}>{children}</div>
+      <div style={{ flex: 1 }} />
+      {right}
+    </div>
+  );
+}
+
+/** A live "streaming" chip - pulsing dot plus label. Signals SSE is attached. */
+export function LiveChip({ label = 'live', color = C.green }: { label?: string; color?: string }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '3px 9px 3px 7px',
+        borderRadius: 999,
+        background: `${color}14`,
+        border: `1px solid ${color}33`,
+        font: `600 10px/1.4 ${MONO}`,
+        letterSpacing: '.08em',
+        color,
+        textTransform: 'uppercase',
+      }}
+    >
+      <span
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: '50%',
+          background: color,
+          animation: pulse(1.8),
+        }}
+      />
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Trend chip - a signed delta with direction colour.
+ * `goodDirection` decides whether up is green or red (rising complaints is bad).
+ */
+export function Trend({
+  value,
+  suffix = '',
+  goodDirection = 'up',
+}: {
+  value: number;
+  suffix?: string;
+  goodDirection?: 'up' | 'down' | 'none';
+}) {
+  const up = value > 0;
+  const flat = value === 0;
+  const good = goodDirection === 'none' ? null : goodDirection === 'up' ? up : !up;
+  const color = flat ? C.inkFaint : good == null ? C.inkFaint : good ? C.green : C.red;
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        font: `600 11px/1 ${MONO}`,
+        color,
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      <span style={{ font: `600 9px/1 ${FONT}` }}>{flat ? '\u2192' : up ? '\u25B2' : '\u25BC'}</span>
+      {up && !flat ? '+' : ''}
+      {value}
+      {suffix}
+    </span>
+  );
+}
+
+/**
+ * Hero KPI cell. Wider type ramp than `Kpi`, a sparkline slot, and an accent
+ * marker. Use inside `KpiBand`.
+ */
+export function KpiHero({
+  label,
+  value,
+  sub,
+  trend,
+  accent = C.accent,
+  spark,
+  index = 0,
+}: {
+  label: string;
+  value: string | number;
+  sub?: ReactNode;
+  trend?: ReactNode;
+  accent?: string;
+  spark?: ReactNode;
+  index?: number;
+}) {
+  return (
+    <div
+      className="mt-kpi"
+      style={{
+        position: 'relative',
+        padding: '22px 24px 20px',
+        borderRight: `1px solid ${C.borderFaint}`,
+        background: GRAD.band,
+        animation: stagger(index),
+        transition: HOVER,
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span
+          style={{
+            width: 3,
+            height: 11,
+            background: accent,
+            borderRadius: 2,
+            flex: '0 0 3px',
+          }}
+        />
+        <div style={{ ...LABEL, letterSpacing: '.15em' }}>{label}</div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 12 }}>
+        <span
+          style={{
+            font: `600 40px/1 ${MONO}`,
+            letterSpacing: TYPE.display,
+            fontVariantNumeric: 'tabular-nums',
+            color: C.ink,
+            animation: countIn(120 + index * 55),
+          }}
+        >
+          {value}
+        </span>
+        {trend && <span style={{ paddingBottom: 6 }}>{trend}</span>}
+      </div>
+
+      {sub && (
+        <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkFaint, marginTop: 7 }}>{sub}</div>
+      )}
+      {spark && <div style={{ marginTop: 10 }}>{spark}</div>}
+    </div>
+  );
+}
+
+/**
+ * Designed empty state. Replaces a bare "No data" line: a glyph, a headline, a
+ * why-line, and an optional action. An empty screen should still look built.
+ */
+export function EmptyState({
+  glyph = '\u25C7',
+  title,
+  hint,
+  action,
+  height = 200,
+  tone = C.inkGhost,
+}: {
+  glyph?: string;
+  title: string;
+  hint?: string;
+  action?: ReactNode;
+  height?: number;
+  tone?: string;
+}) {
+  return (
+    <div
+      style={{
+        minHeight: height,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+        padding: '28px 20px',
+        textAlign: 'center',
+        animation: rise(60),
+      }}
+    >
+      <div
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 10,
+          display: 'grid',
+          placeItems: 'center',
+          background: C.raised,
+          border: `1px solid ${C.borderSoft}`,
+          font: `400 17px/1 ${FONT}`,
+          color: tone,
+          marginBottom: 8,
+        }}
+      >
+        {glyph}
+      </div>
+      <div style={{ font: `600 13px/1.4 ${FONT}`, color: C.inkMuted }}>{title}</div>
+      {hint && (
+        <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkGhost, maxWidth: 300 }}>{hint}</div>
+      )}
+      {action && <div style={{ marginTop: 10 }}>{action}</div>}
+    </div>
+  );
+}
+
+/** Shimmering placeholder block, for a panel awaiting its first payload. */
+export function Skeleton({
+  height = 14,
+  width = '100%',
+  radius = 4,
+}: {
+  height?: number | string;
+  width?: number | string;
+  radius?: number;
+}) {
+  return (
+    <div
+      style={{
+        height,
+        width,
+        borderRadius: radius,
+        background: C.raised,
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'linear-gradient(90deg,transparent 0%,#FFFFFFAA 50%,transparent 100%)',
+          animation: shimmer(1.6),
+        }}
+      />
+    </div>
+  );
+}
+
+/** Several skeleton rows, sized like a table body. */
+export function SkeletonRows({ rows = 4 }: { rows?: number }) {
+  return (
+    <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <Skeleton width={64} height={11} />
+          <div style={{ flex: 1 }}>
+            <Skeleton height={11} />
+          </div>
+          <Skeleton width={44} height={11} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Severity/score badge with a filled leading block - louder than `Pill` for the
+ * one number on screen that should draw the eye first.
+ */
+export function ScoreBadge({
+  score,
+  band,
+  digits = 2,
+}: {
+  score: number;
+  band: string;
+  digits?: number;
+}) {
+  const { color, tint } = bandColors(band.toUpperCase());
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'stretch',
+        borderRadius: 4,
+        overflow: 'hidden',
+        border: `1px solid ${color}33`,
+        background: tint,
+      }}
+    >
+      <span
+        style={{
+          padding: '3px 8px',
+          font: `600 13px/1.3 ${MONO}`,
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '-.02em',
+          color: '#FFFFFF',
+          background: color,
+        }}
+      >
+        {score.toFixed(digits)}
+      </span>
+      <span
+        style={{
+          padding: '3px 8px',
+          font: `600 10px/1.6 ${MONO}`,
+          letterSpacing: '.06em',
+          color,
+          textTransform: 'uppercase',
+        }}
+      >
+        {band}
+      </span>
+    </span>
+  );
+}
+
+/** Section heading between stacked panels, with a hairline rule. */
+export function SectionRule({ children, right }: { children: ReactNode; right?: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '4px 0 2px' }}>
+      <div style={{ ...LABEL, letterSpacing: '.15em', whiteSpace: 'nowrap' }}>{children}</div>
+      <div style={{ flex: 1, height: 1, background: C.borderSoft }} />
+      {right}
+    </div>
+  );
+}

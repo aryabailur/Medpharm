@@ -19,7 +19,7 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 
-import { C, draw, EASE, FONT, grow, MONO, riseBar } from '../lib/theme';
+import { C, draw, EASE, FONT, grow, MONO, riseBar, SERIES, VIZ_TINT } from '../lib/theme';
 
 // ─── Shared internals ────────────────────────────────────────────────────────
 
@@ -58,6 +58,23 @@ function Grid({ ys, x1, x2 }: { ys: number[]; x1: number; x2: number }) {
 
 /** The axis-label type style, used for every `<text>` in this file. */
 const axisText: CSSProperties = { font: `400 10px ${MONO}`, fill: C.inkSoft };
+
+/**
+ * Deterministic gradient id, built from stable inputs (a caller-supplied id,
+ * or the series label/colour) rather than `useId()` or `Math.random()` — these
+ * components render on the server, so the id must match byte-for-byte between
+ * the server render and the client hydration pass.
+ */
+function gradId(seed: string, salt: string) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  return `mtg-${salt}-${(h >>> 0).toString(36)}`;
+}
+
+/** Skip every Nth label so ticks never overlap when the axis is crowded. */
+function tickStep(count: number, maxLabels: number) {
+  return Math.max(1, Math.ceil(count / Math.max(1, maxLabels)));
+}
 
 /** Caption strip under a chart — evenly spaced mono ticks. */
 export function AxisStrip({ labels }: { labels: string[] }) {
@@ -137,6 +154,8 @@ export function TemperatureChart({
   bands = [],
   height = 222,
   ticks,
+  gradId: gradIdProp,
+  ariaLabel,
 }: {
   readings: TempReading[];
   minC?: number;
@@ -145,6 +164,9 @@ export function TemperatureChart({
   bands?: Array<{ from: number; to: number; label?: string }>;
   height?: number;
   ticks?: string[];
+  /** Deterministic id for the under-line gradient wash. Defaults from the data. */
+  gradId?: string;
+  ariaLabel?: string;
 }) {
   if (readings.length === 0) return <NoData height={height} />;
 
@@ -168,6 +190,10 @@ export function TemperatureChart({
   const xAt = (i: number) => (n === 1 ? padL + innerW / 2 : padL + (i / (n - 1)) * innerW);
 
   const pts = readings.map((r, i) => `${xAt(i)},${yAt(r.tempC)}`);
+  const gid = gradId(gradIdProp ?? `${readings[0]!.ts}-${n}-${minC}-${maxC}`, 'temp');
+  const last0 = readings[n - 1]!;
+  const label =
+    ariaLabel ?? `Temperature trace, ${n} readings, latest ${last0.tempC}°C, band ${minC}° to ${maxC}°C`;
 
   // Contiguous out-of-band runs, each drawn as its own red polyline. Extending
   // one index either side joins the run to the in-band line it breaks from.
@@ -191,9 +217,22 @@ export function TemperatureChart({
 
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height, display: 'block' }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: '100%', height, display: 'block' }}
+        role="img"
+        aria-label={label}
+      >
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={`${C.accent}28`} />
+            <stop offset="100%" stopColor={`${C.accent}00`} />
+          </linearGradient>
+        </defs>
         {/* Permitted band, behind everything. */}
-        <rect x={padL} y={yAt(maxC)} width={innerW} height={yAt(minC) - yAt(maxC)} fill={C.bandFill} />
+        <rect x={padL} y={yAt(maxC)} width={innerW} height={yAt(minC) - yAt(maxC)} fill={C.bandFill}>
+          <title>{`Permitted band ${minC}°–${maxC}°C`}</title>
+        </rect>
 
         {/* Excursion columns. */}
         {bands.map((b, i) => {
@@ -201,7 +240,9 @@ export function TemperatureChart({
           const w = Math.max(2, (Math.min(1, b.to) - Math.max(0, b.from)) * innerW);
           return (
             <g key={i}>
-              <rect x={x} y={padT} width={w} height={innerH} fill={C.amberTint} />
+              <rect x={x} y={padT} width={w} height={innerH} fill={C.amberTint}>
+                <title>{b.label ?? 'Excursion window'}</title>
+              </rect>
               {b.label && (
                 <text x={x + 8} y={padT + 15} style={{ font: `400 10px ${MONO}`, fill: C.amber }}>
                   {b.label}
@@ -230,16 +271,26 @@ export function TemperatureChart({
         </g>
 
         {n === 1 ? (
-          <circle cx={xAt(0)} cy={yAt(last.tempC)} r={4} fill={C.accent} />
+          <circle cx={xAt(0)} cy={yAt(last.tempC)} r={4} fill={C.accent}>
+            <title>{`${last.ts}: ${last.tempC}°C`}</title>
+          </circle>
         ) : (
-          <polyline
-            points={pts.join(' ')}
-            fill="none"
-            stroke={C.accent}
-            strokeWidth={2.5}
-            strokeLinejoin="round"
-            style={draw(1)}
-          />
+          <>
+            <polyline
+              points={[...pts, `${xAt(n - 1)},${padT + innerH}`, `${xAt(0)},${padT + innerH}`].join(' ')}
+              fill={`url(#${gid})`}
+              stroke="none"
+              style={{ animation: `mtFade .8s ${EASE} .2s both` }}
+            />
+            <polyline
+              points={pts.join(' ')}
+              fill="none"
+              stroke={C.accent}
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+              style={draw(1)}
+            />
+          </>
         )}
 
         {runs.map((r, i) => (
@@ -255,7 +306,9 @@ export function TemperatureChart({
         ))}
 
         {/* Square end-marker on the latest reading. */}
-        <rect x={xAt(n - 1) - 4} y={yAt(last.tempC) - 4} width={8} height={8} fill={C.accent} />
+        <rect x={xAt(n - 1) - 4} y={yAt(last.tempC) - 4} width={8} height={8} fill={C.accent}>
+          <title>{`${last.ts}: ${last.tempC}°C`}</title>
+        </rect>
       </svg>
       {ticks && ticks.length > 0 && <AxisStrip labels={ticks} />}
     </div>
@@ -315,7 +368,12 @@ export function RouteMap({
 
   return (
     <div style={{ position: 'relative', height, background: C.bg }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height, display: 'block' }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: '100%', height, display: 'block' }}
+        role="img"
+        aria-label={`Route from ${origin} to ${destination}, ${Math.round(p * 100)}% complete${incident ? `, incident: ${incident}` : ''}`}
+      >
         <g stroke={C.borderFaint} strokeWidth={1}>
           <path d="M0 37 H720 M0 96 H720 M0 155 H720 M0 214 H720 M0 273 H720" />
           <path d="M60 0 V296 M180 0 V296 M300 0 V296 M420 0 V296 M540 0 V296 M660 0 V296" />
@@ -346,13 +404,23 @@ export function RouteMap({
           />
         )}
 
-        <rect x={A.x - 5} y={A.y - 5} width={10} height={10} fill={C.inkMuted} />
-        {incident && <rect x={inc.x - 5} y={inc.y - 5} width={10} height={10} fill={C.amber} />}
-        <rect x={D.x - 5} y={D.y - 5} width={10} height={10} fill={C.green} />
+        <rect x={A.x - 5} y={A.y - 5} width={10} height={10} fill={C.inkMuted}>
+          <title>{`Origin: ${origin}`}</title>
+        </rect>
+        {incident && (
+          <rect x={inc.x - 5} y={inc.y - 5} width={10} height={10} fill={C.amber}>
+            <title>{incident}</title>
+          </rect>
+        )}
+        <rect x={D.x - 5} y={D.y - 5} width={10} height={10} fill={C.green}>
+          <title>{`Destination: ${destination}`}</title>
+        </rect>
 
         {/* Current position: ring + dot, so it reads as live. */}
         <circle cx={here.x} cy={here.y} r={11} fill="none" stroke={C.ink} strokeWidth={1} />
-        <circle cx={here.x} cy={here.y} r={5} fill={C.ink} />
+        <circle cx={here.x} cy={here.y} r={5} fill={C.ink}>
+          <title>{now ? `Now: ${now}` : `${Math.round(p * 100)}% complete`}</title>
+        </circle>
 
         <text x={A.x - 5} y={A.y + 24} style={{ font: `400 11px ${MONO}`, fill: C.inkMuted }}>
           {origin}
@@ -460,6 +528,8 @@ export function Donut({
           flex: `0 0 ${size}px`,
           animation: `mtFade .7s ease .15s both`,
         }}
+        role="img"
+        aria-label={`${totalLabel}: ${total} total, ${arcs.map((a) => `${a.label} ${a.pct}`).join(', ')}`}
       >
         <circle cx={60} cy={60} r={R} fill="none" stroke={C.borderSoft} strokeWidth={15} />
         {arcs.map((a) => (
@@ -474,7 +544,9 @@ export function Donut({
             strokeDasharray={a.dash}
             strokeDashoffset={a.offset}
             transform="rotate(-90 60 60)"
-          />
+          >
+            <title>{`${a.label}: ${a.count} (${a.pct})`}</title>
+          </circle>
         ))}
         <text
           x={60}
@@ -566,6 +638,8 @@ export function PieChart({
     <svg
       viewBox="0 0 120 120"
       style={{ width: size, height: size, flex: `0 0 ${size}px`, animation: `mtFade .7s ease .15s both` }}
+      role="img"
+      aria-label={data.map((d) => `${d.label}: ${d.value}`).join(', ')}
     >
       <circle cx={60} cy={60} r={R} fill="none" stroke={C.borderSoft} strokeWidth={15} />
       {data
@@ -584,7 +658,9 @@ export function PieChart({
               strokeDasharray={`${(frac * CIRC).toFixed(1)} ${CIRC.toFixed(1)}`}
               strokeDashoffset={(-acc * CIRC).toFixed(1)}
               transform="rotate(-90 60 60)"
-            />
+            >
+              <title>{`${d.label}: ${d.value} (${Math.round(frac * 100)}%)`}</title>
+            </circle>
           );
           acc += frac;
           return seg;
@@ -612,12 +688,19 @@ export function AreaSparkline({
   color = C.accent,
   fill = C.accentTint,
   ticks,
+  gradient = false,
+  gradId: gradIdProp,
+  ariaLabel,
 }: {
   values: number[];
   height?: number;
   color?: string;
   fill?: string;
   ticks?: string[];
+  /** Use a top-to-bottom fade of `color` instead of the flat `fill` tint. */
+  gradient?: boolean;
+  gradId?: string;
+  ariaLabel?: string;
 }) {
   if (values.length === 0) return <NoData height={height} />;
 
@@ -640,19 +723,37 @@ export function AreaSparkline({
   const area = [...pts, `${xAt(n - 1).toFixed(1)},${H - 8}`, `${padX},${H - 8}`];
   const lastX = xAt(n - 1);
   const lastY = yAt(values[n - 1]!);
+  const last = values[n - 1]!;
+  const gid = gradient ? gradId(gradIdProp ?? `${color}-${n}-${min}-${max}`, 'area') : '';
+  const label = ariaLabel ?? `Trend, ${n} points, latest ${last}`;
 
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height, display: 'block' }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: '100%', height, display: 'block' }}
+        role="img"
+        aria-label={label}
+      >
+        {gradient && (
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={`${color}28`} />
+              <stop offset="100%" stopColor={`${color}00`} />
+            </linearGradient>
+          </defs>
+        )}
         <Grid ys={[padT + innerH * 0.25, padT + innerH * 0.5, padT + innerH * 0.75]} x1={0} x2={W} />
         <polyline
           points={area.join(' ')}
-          fill={fill}
+          fill={gradient ? `url(#${gid})` : fill}
           stroke="none"
           style={{ animation: `mtFade .7s ease .25s both` }}
         />
         {n === 1 ? (
-          <circle cx={lastX} cy={lastY} r={3} fill={color} />
+          <circle cx={lastX} cy={lastY} r={3} fill={color}>
+            <title>{String(last)}</title>
+          </circle>
         ) : (
           <polyline
             points={pts.join(' ')}
@@ -663,7 +764,9 @@ export function AreaSparkline({
             style={draw(0.9)}
           />
         )}
-        <rect x={Math.min(lastX, W - 8) - 4} y={lastY - 4} width={8} height={8} fill={color} />
+        <rect x={Math.min(lastX, W - 8) - 4} y={lastY - 4} width={8} height={8} fill={color}>
+          <title>{String(last)}</title>
+        </rect>
       </svg>
       {ticks && ticks.length > 0 && <AxisStrip labels={ticks} />}
     </div>
@@ -684,6 +787,9 @@ export function ForecastChart({
   band,
   height = 238,
   yFormat = (v: number) => String(Math.round(v)),
+  gradient = false,
+  gradId: gradIdProp,
+  ariaLabel,
 }: {
   history: Array<{ x: string; y: number }>;
   forecast: Array<{ x: string; y: number }>;
@@ -691,6 +797,10 @@ export function ForecastChart({
   band?: Array<{ hi: number; lo: number }>;
   height?: number;
   yFormat?: (v: number) => string;
+  /** Add a top-to-bottom fade under the history line, in `C.ink`. */
+  gradient?: boolean;
+  gradId?: string;
+  ariaLabel?: string;
 }) {
   if (history.length === 0 && forecast.length === 0) return <NoData height={height} />;
 
@@ -734,10 +844,27 @@ export function ForecastChart({
 
   const gridYs = [0, 0.25, 0.5, 0.75, 1].map((f) => padT + innerH * f);
   const labels = [...history, ...forecast];
-  const everyNth = Math.max(1, Math.ceil(total / 10));
+  const everyNth = tickStep(total, 10);
+  const gid = gradient ? gradId(gradIdProp ?? `${history.length}-${forecast.length}-${max}`, 'fc') : '';
+  const label =
+    ariaLabel ??
+    `History and forecast, ${history.length} measured points, ${forecast.length} forecast points`;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height, display: 'block' }}>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: '100%', height, display: 'block' }}
+      role="img"
+      aria-label={label}
+    >
+      {gradient && (
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={`${C.ink}1F`} />
+            <stop offset="100%" stopColor={`${C.ink}00`} />
+          </linearGradient>
+        </defs>
+      )}
       <Grid ys={gridYs} x1={padL} x2={W - padR} />
 
       <g>
@@ -749,7 +876,20 @@ export function ForecastChart({
       </g>
 
       {bandPath && (
-        <path d={bandPath} fill={C.forecastBand} style={{ animation: `mtFade .8s ease .3s both` }} />
+        <path d={bandPath} fill={C.forecastBand} style={{ animation: `mtFade .8s ease .3s both` }}>
+          <title>Forecast confidence band</title>
+        </path>
+      )}
+
+      {gradient && hPts.length > 1 && (
+        <polyline
+          points={[...hPts, `${xAt(history.length - 1)},${padT + innerH}`, `${xAt(0)},${padT + innerH}`].join(
+            ' ',
+          )}
+          fill={`url(#${gid})`}
+          stroke="none"
+          style={{ animation: `mtFade .8s ease .2s both` }}
+        />
       )}
 
       {hPts.length > 1 && (
@@ -817,6 +957,8 @@ export function ColumnChart({
   gap = 14,
   valueFont = `600 13px/1 ${MONO}`,
   footnote,
+  rounded = true,
+  ariaLabel,
 }: {
   bars: Array<{ label: string; count: number; color: string; note?: string }>;
   height?: number;
@@ -824,12 +966,19 @@ export function ColumnChart({
   gap?: number;
   valueFont?: string;
   footnote?: ReactNode;
+  /** Small corner radius on the bar tops. Set false to match the old square look. */
+  rounded?: boolean;
+  ariaLabel?: string;
 }) {
   if (bars.length === 0) return <NoData height={height} />;
   const worst = Math.max(...bars.map((b) => b.count), 0) || 1;
 
   return (
-    <div>
+    <div
+      role="img"
+      aria-label={ariaLabel ?? bars.map((b) => `${b.label}: ${b.count}`).join(', ')}
+    >
+      <style>{`.mt-col-bar { transition: filter .15s ${EASE}, opacity .15s ${EASE}; } .mt-col-bar:hover { filter: brightness(1.08); opacity: .92; }`}</style>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap, height }}>
         {bars.map((b) => (
           <div
@@ -846,10 +995,13 @@ export function ColumnChart({
           >
             <span style={{ font: valueFont, color: b.color }}>{b.count}</span>
             <div
+              className="mt-col-bar"
+              title={`${b.label}: ${b.count}`}
               style={{
                 width: '100%',
                 height: Math.round((b.count / worst) * barMax),
                 background: b.color,
+                borderRadius: rounded ? '3px 3px 0 0' : 0,
                 transformOrigin: 'bottom',
                 animation: riseBar,
               }}
@@ -899,12 +1051,17 @@ export function BarChart({
   data,
   valueFormat,
   labelWidth = 130,
+  rounded = true,
+  ariaLabel,
 }: {
   data: Array<{ label: string; value: number; color?: string }>;
   valueFormat?: (v: number) => string;
   labelWidth?: number;
   horizontal?: boolean;
   height?: number;
+  /** Small corner radius on the bar's leading end. Set false for the old square look. */
+  rounded?: boolean;
+  ariaLabel?: string;
 }) {
   const fmt = valueFormat ?? ((v: number) => v.toLocaleString('en-IN'));
   if (data.length === 0) return <NoData height={80} />;
@@ -913,7 +1070,12 @@ export function BarChart({
   const scale = max === 0 ? () => 0 : (v: number) => Math.abs(v) / max;
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div
+      style={{ display: 'grid', gap: 10 }}
+      role="img"
+      aria-label={ariaLabel ?? data.map((d) => `${d.label}: ${fmt(d.value)}`).join(', ')}
+    >
+      <style>{`.mt-bar-fill { transition: filter .15s ${EASE}; } .mt-bar-fill:hover { filter: brightness(1.08); }`}</style>
       {data.map((d, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div
@@ -929,12 +1091,15 @@ export function BarChart({
           >
             {d.label}
           </div>
-          <div style={{ flex: 1, background: C.borderSoft, height: 6 }}>
+          <div style={{ flex: 1, background: C.borderSoft, height: 6, borderRadius: rounded ? 3 : 0 }}>
             <div
+              className="mt-bar-fill"
+              title={`${d.label}: ${fmt(d.value)}`}
               style={{
                 width: `${scale(d.value) * 100}%`,
                 height: 6,
                 background: d.color ?? C.accent,
+                borderRadius: rounded ? 3 : 0,
                 transformOrigin: 'left',
                 animation: grow(200),
               }}
@@ -975,7 +1140,11 @@ export function Meter({
   delayMs?: number;
 }) {
   const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
-  const full = width === 'full';
+  // Several callers pass width={9999} meaning "fill the row" — a leftover from
+  // before `width="full"` existed. Anything above 4000px isn't a real fixed
+  // width anyone wants rendered, so treat it the same as 'full' rather than
+  // overflowing the container.
+  const full = width === 'full' || (typeof width === 'number' && width > 4000);
   return (
     <div
       style={{
@@ -983,9 +1152,14 @@ export function Meter({
         height: thickness,
         background: C.borderSoft,
         flex: full ? '1 1 auto' : `0 0 ${width}px`,
+        borderRadius: thickness / 2,
+        overflow: 'hidden',
       }}
+      role="img"
+      aria-label={`${Math.round(clamped)}%`}
     >
       <div
+        title={`${Math.round(clamped)}%`}
         style={{
           width: `${clamped}%`,
           height: thickness,
@@ -1024,14 +1198,14 @@ export function MiniSparkline({
 
   if (n === 1) {
     return (
-      <svg width={width} height={height}>
+      <svg width={width} height={height} role="img" aria-label={String(values[0])}>
         <circle cx={xAt(0)} cy={yAt(values[0]!)} r={2} fill={color} />
       </svg>
     );
   }
 
   return (
-    <svg width={width} height={height}>
+    <svg width={width} height={height} role="img" aria-label={`Trend, ${n} points, latest ${values[n - 1]}`}>
       <polyline
         points={values.map((v, i) => `${xAt(i)},${yAt(v)}`).join(' ')}
         fill="none"
@@ -1039,6 +1213,58 @@ export function MiniSparkline({
         strokeWidth={1.5}
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+// ─── SparkBars ───────────────────────────────────────────────────────────────
+
+/**
+ * Tiny inline bar sparkline, the bar-chart sibling of `MiniSparkline`.
+ *
+ * For a table cell where the shape of small discrete counts (not a trend
+ * line) is the point — e.g. weekly excursion counts per route row.
+ */
+export function SparkBars({
+  values,
+  width = 80,
+  height = 24,
+  color = C.accent,
+}: {
+  values: number[];
+  width?: number;
+  height?: number;
+  color?: string;
+}) {
+  if (values.length === 0) return <svg width={width} height={height} />;
+
+  const max = Math.max(...values.map((v) => Math.abs(v)), 0) || 1;
+  const pad = 1;
+  const innerH = height - pad * 2;
+  const n = values.length;
+  const gap = 1.5;
+  const barW = Math.max(1, (width - pad * 2 - gap * (n - 1)) / n);
+
+  return (
+    <svg width={width} height={height} role="img" aria-label={`${n} values, latest ${values[n - 1]}`}>
+      {values.map((v, i) => {
+        const h = Math.max(1, (Math.abs(v) / max) * innerH);
+        const x = pad + i * (barW + gap);
+        const y = height - pad - h;
+        return (
+          <rect
+            key={i}
+            x={x}
+            y={y}
+            width={barW}
+            height={h}
+            fill={color}
+            style={{ transformOrigin: `${(x + barW / 2).toFixed(1)}px ${height - pad}px`, animation: riseBar }}
+          >
+            <title>{String(v)}</title>
+          </rect>
+        );
+      })}
     </svg>
   );
 }
@@ -1066,12 +1292,14 @@ export function SignalBars({
             <span style={{ font: `500 12px/1.35 ${FONT}`, color: C.ink }}>{s.label}</span>
             <span style={{ font: `600 12px/1 ${MONO}`, color: s.color }}>{s.value}</span>
           </div>
-          <div style={{ height: 4, background: C.borderSoft, marginTop: 8 }}>
+          <div style={{ height: 4, background: C.borderSoft, marginTop: 8, borderRadius: 2 }}>
             <div
+              title={`${s.label}: ${s.value}`}
               style={{
                 height: 4,
                 width: `${Math.max(0, Math.min(100, s.pct))}%`,
                 background: s.color,
+                borderRadius: 2,
                 transformOrigin: 'left',
                 animation: grow(150),
               }}
@@ -1140,9 +1368,12 @@ export function StepRail({
 export function MultiLineChart({
   series,
   height = 200,
+  yUnit = '',
 }: {
   series: Array<{ name: string; color: string; points: Array<{ x: string; y: number }> }>;
   height?: number;
+  /** Suffix appended to each y-axis tick, e.g. '%' or ' units'. */
+  yUnit?: string;
 }) {
   const nonEmpty = series.filter((s) => s.points.length > 0);
   if (nonEmpty.length === 0) return <NoData height={height} />;
@@ -1165,14 +1396,19 @@ export function MultiLineChart({
   const xAt = (i: number) => (maxN === 1 ? padL + innerW / 2 : padL + (i / (maxN - 1)) * innerW);
 
   const ticks = nonEmpty.reduce((a, b) => (b.points.length > a.points.length ? b : a)).points;
-  const everyNth = Math.max(1, Math.ceil(ticks.length / 8));
+  const everyNth = tickStep(ticks.length, 8);
 
   return (
     <div>
       <div style={{ marginBottom: 10 }}>
         <Legend items={nonEmpty.map((s) => ({ label: s.name, color: s.color }))} />
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height, display: 'block' }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: '100%', height, display: 'block' }}
+        role="img"
+        aria-label={nonEmpty.map((s) => s.name).join(', ')}
+      >
         <Grid
           ys={[0, 0.25, 0.5, 0.75, 1].map((f) => padT + innerH * f)}
           x1={padL}
@@ -1182,12 +1418,15 @@ export function MultiLineChart({
           {[1, 0.5, 0].map((f) => (
             <text key={f} x={8} y={padT + innerH * (1 - f) + 4} style={axisText}>
               {Math.round(max * 1.08 * f).toLocaleString('en-IN')}
+              {yUnit}
             </text>
           ))}
         </g>
         {nonEmpty.map((s, si) =>
           s.points.length === 1 ? (
-            <circle key={s.name} cx={xAt(0)} cy={yAt(s.points[0]!.y)} r={3.5} fill={s.color} />
+            <circle key={s.name} cx={xAt(0)} cy={yAt(s.points[0]!.y)} r={3.5} fill={s.color}>
+              <title>{`${s.name}: ${s.points[0]!.y}`}</title>
+            </circle>
           ) : (
             <polyline
               key={s.name}
@@ -1197,7 +1436,9 @@ export function MultiLineChart({
               strokeWidth={2.5}
               strokeLinejoin="round"
               style={draw(0.9, si * 120)}
-            />
+            >
+              <title>{s.name}</title>
+            </polyline>
           ),
         )}
         <g>
@@ -1251,7 +1492,12 @@ export function ScatterPlot({
   const yAt = (v: number) => padT + innerH - sy(v) * innerH;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height, display: 'block' }}>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: '100%', height, display: 'block' }}
+      role="img"
+      aria-label={`Scatter of ${points.length} points${xLabel ? `, ${xLabel}` : ''}${yLabel ? ` vs ${yLabel}` : ''}`}
+    >
       <Grid
         ys={[0, 0.25, 0.5, 0.75, 1].map((f) => padT + innerH * f)}
         x1={padL}
@@ -1310,7 +1556,9 @@ export function ScatterPlot({
             width={8}
             height={8}
             fill={p.color ?? C.accent}
-          />
+          >
+            <title>{`${p.label}: (${p.x}, ${p.y})`}</title>
+          </rect>
           <text x={xAt(p.x) + 9} y={yAt(p.y) + 4} style={{ font: `400 10px ${MONO}`, fill: C.inkMuted }}>
             {p.label}
           </text>
@@ -1367,5 +1615,930 @@ export function Histogram({
       height={height}
       barMax={Math.max(40, height - 44)}
     />
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW PRIMITIVES — fill the blank boxes. Same guards, same motion language:
+// entrance-only animation, NoData on empty input, safeScale discipline so a
+// zero span never reaches an SVG coordinate as NaN.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── StackedBarChart ─────────────────────────────────────────────────────────
+
+/**
+ * Stacked categorical columns with a legend — order-status mix by district or
+ * institution, drug-class share of dispatch volume, and similar "parts of a
+ * whole, per category" breakdowns.
+ */
+export interface StackedBarDatum {
+  label: string;
+  /** Segment values, same series across every datum (missing = 0). */
+  values: number[];
+}
+
+export function StackedBarChart({
+  data,
+  seriesNames,
+  colors = SERIES,
+  height = 220,
+  valueFormat = (v: number) => v.toLocaleString('en-IN'),
+  ariaLabel,
+}: {
+  data: StackedBarDatum[];
+  seriesNames: string[];
+  colors?: readonly string[];
+  height?: number;
+  valueFormat?: (v: number) => string;
+  ariaLabel?: string;
+}) {
+  if (data.length === 0 || seriesNames.length === 0) return <NoData height={height} />;
+
+  const totals = data.map((d) => d.values.reduce((a, v) => a + (v || 0), 0));
+  const max = Math.max(...totals, 0) || 1;
+  const barMax = height - 30;
+
+  return (
+    <div>
+      <div style={{ marginBottom: 10 }}>
+        <Legend items={seriesNames.map((name, i) => ({ label: name, color: colors[i % colors.length]! }))} />
+      </div>
+      <div
+        style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height }}
+        role="img"
+        aria-label={
+          ariaLabel ?? `Stacked bars: ${data.map((d, i) => `${d.label} total ${totals[i]}`).join(', ')}`
+        }
+      >
+        {data.map((d, di) => {
+          const total = totals[di]!;
+          const barH = Math.max(1, Math.round((total / max) * barMax));
+          return (
+            <div
+              key={d.label}
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 8,
+                height: '100%',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <div
+                style={{
+                  width: '100%',
+                  height: barH,
+                  display: 'flex',
+                  flexDirection: 'column-reverse',
+                  borderRadius: '3px 3px 0 0',
+                  overflow: 'hidden',
+                  transformOrigin: 'bottom',
+                  animation: `mtRiseBar .6s ${EASE} ${di * 60}ms both`,
+                }}
+              >
+                {d.values.map((v, si) => {
+                  if (!v) return null;
+                  const segH = (v / total) * barH;
+                  return (
+                    <div
+                      key={si}
+                      title={`${seriesNames[si]}: ${valueFormat(v)}`}
+                      style={{
+                        width: '100%',
+                        height: Math.max(0, segH - 1),
+                        marginTop: si === 0 ? 0 : 2,
+                        background: colors[si % colors.length],
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              <span
+                style={{
+                  font: `500 9px/1 ${MONO}`,
+                  letterSpacing: '.08em',
+                  color: C.inkFaint,
+                  textAlign: 'center',
+                }}
+              >
+                {d.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── GroupedBarChart ─────────────────────────────────────────────────────────
+
+/**
+ * Side-by-side comparison bars — requested vs approved quantity, planned vs
+ * actual, this-period vs last-period — grouped per category with a legend.
+ */
+export function GroupedBarChart({
+  data,
+  seriesNames,
+  colors = SERIES,
+  height = 200,
+  valueFormat = (v: number) => v.toLocaleString('en-IN'),
+  ariaLabel,
+}: {
+  data: Array<{ label: string; values: number[] }>;
+  seriesNames: string[];
+  colors?: readonly string[];
+  height?: number;
+  valueFormat?: (v: number) => string;
+  ariaLabel?: string;
+}) {
+  if (data.length === 0 || seriesNames.length === 0) return <NoData height={height} />;
+
+  const max = Math.max(...data.flatMap((d) => d.values.map((v) => v || 0)), 0) || 1;
+  const barMax = height - 46;
+
+  return (
+    <div>
+      <div style={{ marginBottom: 10 }}>
+        <Legend items={seriesNames.map((name, i) => ({ label: name, color: colors[i % colors.length]! }))} />
+      </div>
+      <style>{`.mt-grp-bar { transition: filter .15s ${EASE}; } .mt-grp-bar:hover { filter: brightness(1.08); }`}</style>
+      <div
+        style={{ display: 'flex', alignItems: 'flex-end', gap: 20, height }}
+        role="img"
+        aria-label={ariaLabel ?? data.map((d) => `${d.label}: ${d.values.join('/')}`).join(', ')}
+      >
+        {data.map((d, di) => (
+          <div
+            key={d.label}
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
+              height: '100%',
+              justifyContent: 'flex-end',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: barMax, width: '100%' }}>
+              {d.values.map((v, si) => (
+                <div
+                  key={si}
+                  className="mt-grp-bar"
+                  title={`${seriesNames[si] ?? `Series ${si + 1}`}: ${valueFormat(v || 0)}`}
+                  style={{
+                    flex: 1,
+                    height: Math.max(1, Math.round(((v || 0) / max) * barMax)),
+                    background: colors[si % colors.length],
+                    borderRadius: '2px 2px 0 0',
+                    transformOrigin: 'bottom',
+                    animation: `mtRiseBar .6s ${EASE} ${di * 70 + si * 40}ms both`,
+                  }}
+                />
+              ))}
+            </div>
+            <span
+              style={{
+                font: `500 9px/1 ${MONO}`,
+                letterSpacing: '.08em',
+                color: C.inkFaint,
+                textAlign: 'center',
+              }}
+            >
+              {d.label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── GaugeArc ────────────────────────────────────────────────────────────────
+
+/**
+ * Semicircular arc gauge with a big centred figure — a single 0–100 KPI, e.g.
+ * on-time delivery %, QC pass rate. Colour follows caller-supplied thresholds
+ * so the same component reads green/amber/red without hardcoding a metric.
+ */
+export function GaugeArc({
+  value,
+  max = 100,
+  label,
+  size = 180,
+  thresholds = [
+    { at: 60, color: C.red },
+    { at: 85, color: C.amber },
+    { at: Infinity, color: C.green },
+  ],
+  unit = '%',
+}: {
+  value: number;
+  max?: number;
+  label?: string;
+  size?: number;
+  /** Ascending breakpoints; the first one `value` is below wins its colour. */
+  thresholds?: Array<{ at: number; color: string }>;
+  unit?: string;
+}) {
+  const v = Math.max(0, Math.min(max, Number.isFinite(value) ? value : 0));
+  const frac = max === 0 ? 0 : v / max;
+  const color = thresholds.find((t) => v <= t.at)?.color ?? C.accent;
+
+  const R = 78;
+  const CX = 100;
+  const CY = 100;
+  const CIRC = Math.PI * R; // half circumference — the arc spans 180°
+  const dash = frac * CIRC;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <svg
+        viewBox="0 0 200 116"
+        style={{ width: size, height: size * 0.58, display: 'block' }}
+        role="img"
+        aria-label={`${label ?? 'Gauge'}: ${v}${unit} of ${max}${unit}`}
+      >
+        <path
+          d={`M ${CX - R} ${CY} A ${R} ${R} 0 0 1 ${CX + R} ${CY}`}
+          fill="none"
+          stroke={C.borderSoft}
+          strokeWidth={14}
+          strokeLinecap="round"
+        />
+        <path
+          d={`M ${CX - R} ${CY} A ${R} ${R} 0 0 1 ${CX + R} ${CY}`}
+          fill="none"
+          stroke={color}
+          strokeWidth={14}
+          strokeLinecap="round"
+          strokeDasharray={`${dash.toFixed(1)} ${CIRC.toFixed(1)}`}
+          style={draw(1, 0, CIRC)}
+        >
+          <title>{`${v}${unit}`}</title>
+        </path>
+        <text x={CX} y={CY - 6} textAnchor="middle" style={{ font: `600 30px ${MONO}`, fill: C.ink }}>
+          {Math.round(v)}
+          <tspan style={{ font: `600 14px ${MONO}` }}>{unit}</tspan>
+        </text>
+      </svg>
+      {label && (
+        <div
+          style={{
+            font: `600 11px/1 ${FONT}`,
+            letterSpacing: '.14em',
+            textTransform: 'uppercase',
+            color: C.inkFaint,
+            marginTop: 4,
+            textAlign: 'center',
+          }}
+        >
+          {label}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Heatmap ─────────────────────────────────────────────────────────────────
+
+/**
+ * Labelled grid with a sequential colour ramp and a legend — consumption by
+ * drug × month, excursions by route × week, or any rows × cols magnitude.
+ */
+export function Heatmap({
+  rows,
+  cols,
+  values,
+  hue = VIZ_TINT.teal,
+  hueStrong = C.accent,
+  valueFormat = (v: number) => v.toLocaleString('en-IN'),
+  cellSize = 34,
+  ariaLabel,
+}: {
+  rows: string[];
+  cols: string[];
+  /** values[rowIndex][colIndex]. Missing cells are treated as 0. */
+  values: number[][];
+  /** Tint used for the low end of the ramp. */
+  hue?: string;
+  /** Solid colour used for the high end of the ramp. */
+  hueStrong?: string;
+  valueFormat?: (v: number) => string;
+  cellSize?: number;
+  ariaLabel?: string;
+}) {
+  if (rows.length === 0 || cols.length === 0) return <NoData height={120} />;
+
+  const flat = values.flatMap((r) => r ?? []);
+  const max = Math.max(...flat, 0);
+  const min = Math.min(...flat, 0);
+  const scale = safeScale(min, max);
+
+  const labelColW = 96;
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <div
+        role="img"
+        aria-label={ariaLabel ?? `Heatmap of ${rows.length} rows by ${cols.length} columns`}
+        style={{ display: 'inline-block' }}
+      >
+        <div style={{ display: 'flex', paddingLeft: labelColW, gap: 3, marginBottom: 4 }}>
+          {cols.map((c) => (
+            <div
+              key={c}
+              style={{
+                width: cellSize,
+                flex: `0 0 ${cellSize}px`,
+                font: `400 9px/1.2 ${MONO}`,
+                color: C.inkFaint,
+                textAlign: 'center',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {c}
+            </div>
+          ))}
+        </div>
+        {rows.map((r, ri) => (
+          <div key={r} style={{ display: 'flex', gap: 3, marginBottom: 3, alignItems: 'center' }}>
+            <div
+              style={{
+                width: labelColW,
+                flex: `0 0 ${labelColW}px`,
+                font: `400 11px/1.3 ${FONT}`,
+                color: C.inkMuted,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                paddingRight: 8,
+              }}
+            >
+              {r}
+            </div>
+            {cols.map((c, ci) => {
+              const v = values[ri]?.[ci] ?? 0;
+              const t = scale(v);
+              return (
+                <div
+                  key={c}
+                  title={`${r} · ${c}: ${valueFormat(v)}`}
+                  style={{
+                    width: cellSize,
+                    height: cellSize,
+                    flex: `0 0 ${cellSize}px`,
+                    borderRadius: 3,
+                    background: t <= 0 ? C.borderSoft : mixHex(hue, hueStrong, t),
+                    animation: `mtFade .4s ${EASE} ${(ri * cols.length + ci) * 12}ms both`,
+                  }}
+                />
+              );
+            })}
+          </div>
+        ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, paddingLeft: labelColW }}>
+          <span style={{ font: `400 9px ${MONO}`, color: C.inkFaint }}>{valueFormat(min)}</span>
+          <div
+            style={{
+              width: 90,
+              height: 8,
+              borderRadius: 4,
+              background: `linear-gradient(90deg, ${C.borderSoft}, ${hueStrong})`,
+            }}
+          />
+          <span style={{ font: `400 9px ${MONO}`, color: C.inkFaint }}>{valueFormat(max)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Linear-interpolates two `#rrggbb` hex colours at `t` in 0..1. */
+function mixHex(a: string, b: string, t: number): string {
+  const pa = hexToRgb(a);
+  const pb = hexToRgb(b);
+  const c = Math.max(0, Math.min(1, t));
+  const r = Math.round(pa.r + (pb.r - pa.r) * c);
+  const g = Math.round(pa.g + (pb.g - pa.g) * c);
+  const bl = Math.round(pa.b + (pb.b - pa.b) * c);
+  return `rgb(${r},${g},${bl})`;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const clean = hex.replace('#', '');
+  const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean;
+  const num = parseInt(full.slice(0, 6), 16);
+  return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+}
+
+// ─── RadarChart ──────────────────────────────────────────────────────────────
+
+/**
+ * Radial chart, 3–8 axes, one or two overlaid polygons — institution
+ * reliability or a 5-signal risk profile, compared against a benchmark.
+ */
+export function RadarChart({
+  axes,
+  series,
+  size = 260,
+  max = 100,
+}: {
+  /** Axis labels, 3 to 8 of them. */
+  axes: string[];
+  series: Array<{ name: string; color: string; values: number[] }>;
+  size?: number;
+  max?: number;
+}) {
+  const n = axes.length;
+  if (n < 3 || series.length === 0) return <NoData height={size} />;
+
+  const CX = 130;
+  const CY = 130;
+  const R = 92;
+  const scale = safeScale(0, max || 1);
+
+  const angleAt = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
+  const pointAt = (i: number, frac: number) => {
+    const a = angleAt(i);
+    const r = Math.max(0, Math.min(1, frac)) * R;
+    return { x: CX + r * Math.cos(a), y: CY + r * Math.sin(a) };
+  };
+
+  const rings = [0.25, 0.5, 0.75, 1];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+      <svg
+        viewBox="0 0 260 260"
+        style={{ width: size, height: size, display: 'block' }}
+        role="img"
+        aria-label={`Radar of ${axes.join(', ')} for ${series.map((s) => s.name).join(', ')}`}
+      >
+        {rings.map((f, i) => (
+          <polygon
+            key={i}
+            points={axes.map((_, ai) => pointAt(ai, f)).map((p) => `${p.x},${p.y}`).join(' ')}
+            fill="none"
+            stroke={C.borderFaint}
+            strokeWidth={1}
+          />
+        ))}
+        {axes.map((_, ai) => {
+          const p = pointAt(ai, 1);
+          return <line key={ai} x1={CX} y1={CY} x2={p.x} y2={p.y} stroke={C.borderFaint} strokeWidth={1} />;
+        })}
+
+        {series.map((s, si) => {
+          const vals = axes.map((_, ai) => scale(s.values[ai] ?? 0));
+          const pts = vals.map((f, ai) => pointAt(ai, f));
+          const path = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+          return (
+            <g key={s.name} style={{ animation: `mtFade .6s ${EASE} ${si * 150}ms both` }}>
+              <polygon points={path} fill={`${s.color}22`} stroke="none" />
+              <polygon
+                points={path}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={2}
+                strokeLinejoin="round"
+                style={draw(0.9, si * 150, 900)}
+              />
+              {pts.map((p, ai) => (
+                <circle key={ai} cx={p.x} cy={p.y} r={3} fill={s.color}>
+                  <title>{`${s.name} · ${axes[ai]}: ${s.values[ai] ?? 0}`}</title>
+                </circle>
+              ))}
+            </g>
+          );
+        })}
+
+        {axes.map((label, ai) => {
+          const p = pointAt(ai, 1.16);
+          return (
+            <text
+              key={label}
+              x={p.x}
+              y={p.y}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              style={axisText}
+            >
+              {label}
+            </text>
+          );
+        })}
+      </svg>
+      {series.length > 1 && (
+        <Legend items={series.map((s) => ({ label: s.name, color: s.color, kind: 'thin' }))} />
+      )}
+    </div>
+  );
+}
+
+// ─── WaterfallChart ──────────────────────────────────────────────────────────
+
+/**
+ * Running-total contribution bars — stock movement (opening, +receipts,
+ * -dispatch, -expiry, closing) or SHAP-style driver contributions toward a
+ * risk score. Positive steps float up in green, negative in red, totals in
+ * ink.
+ */
+export interface WaterfallStep {
+  label: string;
+  /** Delta for a step, or the absolute value when `isTotal` is set. */
+  value: number;
+  isTotal?: boolean;
+}
+
+export function WaterfallChart({
+  steps,
+  height = 220,
+  valueFormat = (v: number) => v.toLocaleString('en-IN'),
+}: {
+  steps: WaterfallStep[];
+  height?: number;
+  valueFormat?: (v: number) => string;
+}) {
+  if (steps.length === 0) return <NoData height={height} />;
+
+  const W = 640;
+  const H = height;
+  const padL = 50;
+  const padR = 16;
+  const padT = 24;
+  const padB = 34;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+
+  let running = 0;
+  const bars = steps.map((s) => {
+    const from = running;
+    const to = s.isTotal ? s.value : running + s.value;
+    running = to;
+    return { ...s, from, to, lo: Math.min(from, to), hi: Math.max(from, to) };
+  });
+
+  const allVals = [0, ...bars.flatMap((b) => [b.from, b.to])];
+  const max = Math.max(...allVals);
+  const min = Math.min(...allVals);
+  const scale = safeScale(Math.min(0, min), Math.max(0, max));
+  const yAt = (v: number) => padT + innerH - scale(v) * innerH;
+  const zeroY = yAt(0);
+
+  const n = bars.length;
+  const gap = 10;
+  const barW = (innerW - gap * (n - 1)) / n;
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: '100%', height, display: 'block' }}
+      role="img"
+      aria-label={`Waterfall: ${bars.map((b) => `${b.label} ${b.isTotal ? b.value : (b.value >= 0 ? '+' : '') + b.value}`).join(', ')}`}
+    >
+      <Grid ys={[padT, zeroY, padT + innerH].filter((y, i, a) => a.indexOf(y) === i)} x1={padL} x2={W - padR} />
+      <line
+        x1={padL}
+        x2={W - padR}
+        y1={zeroY}
+        y2={zeroY}
+        stroke={C.borderActive}
+        strokeWidth={1}
+        strokeDasharray="3 4"
+      />
+      {bars.map((b, i) => {
+        const x = padL + i * (barW + gap);
+        const y = yAt(b.hi);
+        const h = Math.max(1, yAt(b.lo) - yAt(b.hi));
+        const color = b.isTotal ? C.ink : b.value >= 0 ? C.green : C.red;
+        const connectorPrev = i > 0 ? bars[i - 1]!.to : null;
+        return (
+          <g key={b.label}>
+            {connectorPrev !== null && (
+              <line
+                x1={x - gap}
+                x2={x}
+                y1={yAt(connectorPrev)}
+                y2={yAt(connectorPrev)}
+                stroke={C.borderFaint}
+                strokeWidth={1}
+                strokeDasharray="2 3"
+              />
+            )}
+            <rect
+              x={x}
+              y={y}
+              width={barW}
+              height={h}
+              fill={color}
+              rx={2}
+              style={{ transformOrigin: `${(x + barW / 2).toFixed(1)}px ${zeroY}px`, animation: `mtRiseBar .5s ${EASE} ${i * 70}ms both` }}
+            >
+              <title>{`${b.label}: ${b.isTotal ? valueFormat(b.value) : `${b.value >= 0 ? '+' : ''}${valueFormat(b.value)}`}`}</title>
+            </rect>
+            <text
+              x={x + barW / 2}
+              y={y - 6}
+              textAnchor="middle"
+              style={{ font: `600 10px ${MONO}`, fill: color }}
+            >
+              {b.isTotal ? valueFormat(b.value) : `${b.value >= 0 ? '+' : ''}${valueFormat(b.value)}`}
+            </text>
+            <text x={x + barW / 2} y={H - 12} textAnchor="middle" style={axisText}>
+              {b.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ─── TimelineBars ────────────────────────────────────────────────────────────
+
+/**
+ * Gantt-ish horizontal timeline of spans with status colours — shipment legs
+ * or a custody chain, one row per actor/leg, spans positioned by fraction
+ * 0..1 across the visible window.
+ */
+export function TimelineBars({
+  rows,
+  height,
+  rowH = 28,
+  labelWidth = 120,
+}: {
+  rows: Array<{
+    label: string;
+    spans: Array<{ from: number; to: number; color: string; note?: string }>;
+  }>;
+  height?: number;
+  rowH?: number;
+  labelWidth?: number;
+}) {
+  if (rows.length === 0) return <NoData height={height ?? 120} />;
+
+  const W = 640;
+  const H = height ?? rows.length * (rowH + 8) + 16;
+  const padL = labelWidth;
+  const padR = 12;
+  const innerW = W - padL - padR;
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: '100%', height: H, display: 'block' }}
+      role="img"
+      aria-label={`Timeline of ${rows.length} rows`}
+    >
+      <line x1={padL} x2={W - padR} y1={8} y2={8} stroke={C.borderFaint} strokeWidth={1} />
+      {rows.map((row, ri) => {
+        const y = 16 + ri * (rowH + 8);
+        return (
+          <g key={row.label}>
+            <text x={0} y={y + rowH / 2 + 4} style={{ font: `400 11px ${FONT}`, fill: C.inkMuted }}>
+              {row.label}
+            </text>
+            <rect x={padL} y={y} width={innerW} height={rowH} fill={C.raised} rx={3} />
+            {row.spans.map((s, si) => {
+              const from = Math.max(0, Math.min(1, s.from));
+              const to = Math.max(from, Math.min(1, s.to));
+              const x = padL + from * innerW;
+              const w = Math.max(3, (to - from) * innerW);
+              return (
+                <rect
+                  key={si}
+                  x={x}
+                  y={y}
+                  width={w}
+                  height={rowH}
+                  fill={s.color}
+                  rx={3}
+                  style={{
+                    transformOrigin: `${x.toFixed(1)}px ${(y + rowH / 2).toFixed(1)}px`,
+                    animation: `mtGrow .5s ${EASE} ${(ri * 3 + si) * 60}ms both`,
+                  }}
+                >
+                  <title>{s.note ?? `${row.label}: ${Math.round((to - from) * 100)}% of window`}</title>
+                </rect>
+              );
+            })}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ─── ProgressRing ────────────────────────────────────────────────────────────
+
+/**
+ * Compact circular progress with a centred percentage — shipment progress in
+ * a list row, or any inline 0–100 completion figure beside text.
+ */
+export function ProgressRing({
+  pct,
+  size = 40,
+  color = C.accent,
+  thickness = 4,
+}: {
+  pct: number;
+  size?: number;
+  color?: string;
+  thickness?: number;
+}) {
+  const v = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const R = 18;
+  const CIRC = 2 * Math.PI * R;
+  const dash = (v / 100) * CIRC;
+
+  return (
+    <svg
+      viewBox="0 0 40 40"
+      style={{ width: size, height: size, display: 'block' }}
+      role="img"
+      aria-label={`${Math.round(v)}% complete`}
+    >
+      <circle cx={20} cy={20} r={R} fill="none" stroke={C.borderSoft} strokeWidth={thickness} />
+      <circle
+        cx={20}
+        cy={20}
+        r={R}
+        fill="none"
+        stroke={color}
+        strokeWidth={thickness}
+        strokeLinecap="round"
+        strokeDasharray={`${dash.toFixed(1)} ${CIRC.toFixed(1)}`}
+        transform="rotate(-90 20 20)"
+        style={draw(0.7, 0, CIRC)}
+      >
+        <title>{`${Math.round(v)}%`}</title>
+      </circle>
+      <text x={20} y={23.5} textAnchor="middle" style={{ font: `600 10px ${MONO}`, fill: C.ink }}>
+        {Math.round(v)}
+      </text>
+    </svg>
+  );
+}
+
+// ─── CalendarHeatmap ─────────────────────────────────────────────────────────
+
+/**
+ * Day-grid intensity map for a 30–90 day window — deliveries or excursions
+ * per day, laid out as ISO weeks (columns) × weekday (rows), GitHub-style.
+ */
+export function CalendarHeatmap({
+  days,
+  hueStrong = C.accent,
+  cell = 13,
+  ariaLabel,
+}: {
+  /** One entry per day, in chronological order. */
+  days: Array<{ date: string; value: number }>;
+  hueStrong?: string;
+  cell?: number;
+  ariaLabel?: string;
+}) {
+  if (days.length === 0) return <NoData height={100} />;
+
+  // Pad the front so the first column starts on a Sunday (col-major weeks).
+  const first = new Date(days[0]!.date);
+  const firstDow = Number.isNaN(first.getTime()) ? 0 : first.getDay();
+  const padded: Array<{ date: string; value: number } | null> = [
+    ...Array.from({ length: firstDow }, () => null),
+    ...days,
+  ];
+  const weeks = Math.ceil(padded.length / 7);
+  const max = Math.max(...days.map((d) => d.value), 0);
+  const scale = safeScale(0, max || 1);
+  const gap = 3;
+  const W = weeks * (cell + gap);
+  const H = 7 * (cell + gap);
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: '100%', maxWidth: W, height: H, display: 'block' }}
+      role="img"
+      aria-label={ariaLabel ?? `Calendar heatmap over ${days.length} days, max ${max}`}
+    >
+      {padded.map((d, i) => {
+        if (!d) return null;
+        const col = Math.floor(i / 7);
+        const row = i % 7;
+        const t = scale(d.value);
+        return (
+          <rect
+            key={d.date}
+            x={col * (cell + gap)}
+            y={row * (cell + gap)}
+            width={cell}
+            height={cell}
+            rx={2}
+            fill={d.value === 0 ? C.borderSoft : mixHex(VIZ_TINT.teal, hueStrong, Math.max(0.15, t))}
+            style={{ animation: `mtFade .35s ${EASE} ${i * 4}ms both` }}
+          >
+            <title>{`${d.date}: ${d.value}`}</title>
+          </rect>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ─── BulletChart ─────────────────────────────────────────────────────────────
+
+/**
+ * Actual vs target vs qualitative range — a compact alternative to `GaugeArc`
+ * for a KPI row where several metrics need to line up vertically (e.g. a
+ * dashboard's "targets" panel: on-time %, QC pass %, SLA adherence).
+ */
+export function BulletChart({
+  label,
+  value,
+  target,
+  max,
+  ranges,
+  valueFormat = (v: number) => v.toLocaleString('en-IN'),
+  color = C.accent,
+  height = 36,
+}: {
+  label: string;
+  value: number;
+  target: number;
+  max: number;
+  /** Qualitative bands (e.g. poor/ok/good), ascending, summing to `max`. */
+  ranges?: Array<{ to: number; color: string }>;
+  valueFormat?: (v: number) => string;
+  color?: string;
+  height?: number;
+}) {
+  const m = max > 0 ? max : 1;
+  const v = Math.max(0, Math.min(m, value));
+  const t = Math.max(0, Math.min(m, target));
+  const bands = ranges && ranges.length > 0 ? ranges : [{ to: m, color: C.borderSoft }];
+
+  const W = 100; // percent-based inner scale
+  const barH = 14;
+  const barY = (height - barH) / 2;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div
+        style={{
+          width: 110,
+          flex: '0 0 110px',
+          font: `400 11px/1.3 ${FONT}`,
+          color: C.inkMuted,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${height}`}
+        style={{ width: '100%', height, display: 'block', flex: '1 1 auto' }}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`${label}: ${valueFormat(v)} of target ${valueFormat(t)}, max ${valueFormat(m)}`}
+      >
+        {bands.map((b, i) => {
+          const prevTo = i === 0 ? 0 : bands[i - 1]!.to;
+          const x = (prevTo / m) * W;
+          const w = ((b.to - prevTo) / m) * W;
+          return <rect key={i} x={x} y={barY} width={w} height={barH} fill={b.color} />;
+        })}
+        <rect
+          x={0}
+          y={barY + barH / 4}
+          width={(v / m) * W}
+          height={barH / 2}
+          fill={color}
+          style={{ transformOrigin: '0px center', animation: grow(150) }}
+        >
+          <title>{`${label}: ${valueFormat(v)}`}</title>
+        </rect>
+        <line
+          x1={(t / m) * W}
+          x2={(t / m) * W}
+          y1={2}
+          y2={height - 2}
+          stroke={C.ink}
+          strokeWidth={2}
+        >
+          <title>{`Target: ${valueFormat(t)}`}</title>
+        </line>
+      </svg>
+      <div style={{ width: 56, flex: '0 0 56px', textAlign: 'right', font: `500 11px/1 ${MONO}`, color: C.ink }}>
+        {valueFormat(v)}
+      </div>
+    </div>
   );
 }

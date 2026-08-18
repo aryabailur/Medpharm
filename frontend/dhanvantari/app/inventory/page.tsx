@@ -8,8 +8,9 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { getInventory, type InventoryRow } from '../../lib/api';
-import { C, FONT, MONO, num, rise, statusColors } from '../../lib/theme';
-import { ApiError, Card, CardTitle, Empty, Meter, PageHeader, Pill } from '../../components/ui';
+import { C, FONT, MONO, num, rupees, statusColors, VIZ } from '../../lib/theme';
+import { ApiError, EmptyState, KpiHero, Panel, PanelTitle, Pill } from '../../components/ui';
+import { BarChart, ColumnChart, PieChart } from '../../components/charts';
 
 const FILTERS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All' },
@@ -55,15 +56,152 @@ export default function Inventory() {
     }
   }, [items, filter]);
 
+  const stockValue = items.reduce((sum, r) => sum + r.qtyOnHand * (r.drug.unitPrice ?? 0), 0);
+  const coldChainCount = items.filter((r) => r.drug.coldChain).length;
+  const lowCount = items.filter((r) => r.lowStock).length;
+
+  // Stock-cover distribution — days of cover bucketed across every line item.
+  const coverBuckets = useMemo(() => {
+    const buckets = { critical: 0, low: 0, ok: 0, healthy: 0 };
+    for (const r of items) {
+      if (r.reorderPoint <= 0) continue;
+      const days = (r.qtyOnHand / r.reorderPoint) * 14;
+      if (days <= 3) buckets.critical++;
+      else if (days <= 7) buckets.low++;
+      else if (days <= 21) buckets.ok++;
+      else buckets.healthy++;
+    }
+    return [
+      { label: '≤3D', count: buckets.critical, color: C.red },
+      { label: '4-7D', count: buckets.low, color: C.amber },
+      { label: '8-21D', count: buckets.ok, color: VIZ.teal },
+      { label: '21D+', count: buckets.healthy, color: C.green },
+    ];
+  }, [items]);
+
+  // ABC-style value composition — the drugs that make up most of stock value
+  // vs the long tail, derived from actual unit price × qty on hand.
+  const valueComposition = useMemo(() => {
+    const valued = items
+      .map((r) => ({ r, value: r.qtyOnHand * (r.drug.unitPrice ?? 0) }))
+      .filter((x) => x.value > 0)
+      .sort((a, b) => b.value - a.value);
+    const total = valued.reduce((s, x) => s + x.value, 0);
+    if (total === 0) return [];
+    let cum = 0;
+    let aValue = 0;
+    let bValue = 0;
+    let cValue = 0;
+    for (const x of valued) {
+      cum += x.value;
+      const pct = cum / total;
+      if (pct <= 0.8) aValue += x.value;
+      else if (pct <= 0.95) bValue += x.value;
+      else cValue += x.value;
+    }
+    return [
+      { label: 'A (top 80%)', value: Math.round(aValue), color: VIZ.violet },
+      { label: 'B (next 15%)', value: Math.round(bValue), color: VIZ.teal },
+      { label: 'C (tail 5%)', value: Math.round(cValue), color: C.grey },
+    ].filter((s) => s.value > 0);
+  }, [items]);
+
+  // Low-stock ranking — thinnest cover first, for the chart-led ranking.
+  const lowRanked = useMemo(
+    () =>
+      items
+        .filter((r) => r.lowStock)
+        .map((r) => ({
+          label: r.drug.name,
+          value: r.reorderPoint > 0 ? Math.round((r.qtyOnHand / r.reorderPoint) * 100) : 0,
+          color: r.qtyOnHand === 0 ? C.red : C.amber,
+        }))
+        .sort((a, b) => a.value - b.value)
+        .slice(0, 8),
+    [items],
+  );
+
   return (
     <>
-      <PageHeader title="Inventory" />
+      <div style={{ padding: '20px 26px 16px', borderBottom: `1px solid ${C.border}`, background: C.surfaceAlt }}>
+        <h1 style={{ margin: 0, font: `600 19px/1.2 ${FONT}`, color: C.ink, letterSpacing: '-0.01em' }}>Inventory</h1>
+        <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 5 }}>
+          Line items across this store
+        </div>
+      </div>
 
-      <div style={{ padding: '26px 26px 52px' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          background: C.surface,
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <KpiHero index={0} label="Stock value" value={rupees(stockValue)} sub={`${items.length} line items`} accent={VIZ.violet} />
+        <KpiHero index={1} label="Below reorder" value={lowCount} accent={C.amber} />
+        <KpiHero index={2} label="Cold chain lines" value={coldChainCount} accent={VIZ.teal} />
+        <KpiHero index={3} label="Line items" value={items.length} accent={VIZ.magenta} />
+      </div>
+
+      <div style={{ padding: '26px 26px 0' }}>
         {error && <ApiError error={error} />}
+      </div>
 
-        <Card style={{ animation: rise(0), overflow: 'hidden' }}>
-          <CardTitle
+      <div style={{ padding: '0 26px 26px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24 }}>
+        <Panel delayMs={0}>
+          <PanelTitle>Stock cover distribution</PanelTitle>
+          <div style={{ padding: 18 }}>
+            {items.length === 0 ? (
+              <EmptyState title="No inventory yet" height={140} />
+            ) : (
+              <ColumnChart bars={coverBuckets} height={110} barMax={70} />
+            )}
+          </div>
+        </Panel>
+
+        <Panel delayMs={40}>
+          <PanelTitle>Value composition</PanelTitle>
+          <div style={{ padding: '18px 16px', display: 'flex', gap: 18, alignItems: 'center' }}>
+            {valueComposition.length === 0 ? (
+              <EmptyState title="No priced stock" height={140} />
+            ) : (
+              <>
+                <PieChart
+                  data={valueComposition}
+                  size={110}
+                  centre={rupees(valueComposition.reduce((a, s) => a + s.value, 0))}
+                />
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {valueComposition.map((s) => (
+                    <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 4, background: s.color, flexShrink: 0 }} />
+                      <span style={{ font: `500 11px/1.3 ${FONT}`, color: C.inkMuted }}>
+                        {s.label} <span style={{ font: `500 11px/1.3 ${MONO}`, color: C.ink }}>{rupees(s.value)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </Panel>
+
+        <Panel delayMs={60}>
+          <PanelTitle>Thinnest cover</PanelTitle>
+          <div style={{ padding: 18 }}>
+            {lowRanked.length === 0 ? (
+              <EmptyState title="Nothing below reorder" height={140} glyph="✓" tone={C.green} />
+            ) : (
+              <BarChart data={lowRanked} valueFormat={(v) => `${v}%`} labelWidth={100} />
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      <div style={{ padding: '0 26px 52px' }}>
+        <Panel delayMs={80} style={{ overflow: 'hidden' }}>
+          <PanelTitle
             right={
               <div style={{ display: 'flex', gap: 8 }}>
                 {FILTERS.map((f) => {
@@ -90,10 +228,10 @@ export default function Inventory() {
             }
           >
             Inventory · {items.length} line items
-          </CardTitle>
+          </PanelTitle>
 
           {filtered.length === 0 ? (
-            <Empty>No inventory lines match this filter.</Empty>
+            <EmptyState title="No inventory lines match this filter" height={180} />
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
@@ -122,7 +260,6 @@ export default function Inventory() {
                   {filtered.map((r) => {
                     const state = stateOf(r);
                     const { color, tint } = statusColors(state);
-                    const pct = r.reorderPoint > 0 ? (r.qtyOnHand / r.reorderPoint) * 100 : 0;
                     const past = r.daysToExpiry != null && r.daysToExpiry <= 0;
                     const soon = r.daysToExpiry != null && r.daysToExpiry <= 90;
                     const expiryColor = past ? C.red : soon ? C.amber : C.inkMuted;
@@ -240,7 +377,7 @@ export default function Inventory() {
               </table>
             </div>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );

@@ -11,8 +11,8 @@
 import { useRef, useState } from 'react';
 
 import { askAssistant, type AssistantAnswer } from '../../lib/api';
-import { C, FONT, MONO, rise } from '../../lib/theme';
-import { ApiError, Button, Card, CardTitle, Empty, PageHeader } from '../../components/ui';
+import { C, FONT, MONO, rise, VIZ } from '../../lib/theme';
+import { ApiError, Button, EmptyState, LiveChip, PageHeader, Panel, PanelTitle } from '../../components/ui';
 
 const PROMPTS = [
   'How much ORS do we have on hand right now?',
@@ -57,12 +57,18 @@ export default function AssistantPage() {
       <PageHeader title="Nidana Assistant" />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.45fr) minmax(0,1fr)', gap: 24, padding: '26px 26px 52px' }}>
-        <Card style={{ display: 'flex', flexDirection: 'column', minHeight: 540, animation: rise(0) }}>
-          <CardTitle>Nidana · this institution</CardTitle>
+        <Panel delayMs={0} style={{ display: 'flex', flexDirection: 'column', minHeight: 540 }}>
+          <PanelTitle dot={VIZ.violet} right={<LiveChip label="scoped to this institution" color={VIZ.violet} />}>
+            Nidana · this institution
+          </PanelTitle>
 
           <div style={{ flex: 1, padding: 16, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
             {turns.length === 0 ? (
-              <Empty>Ask about this institution&rsquo;s own stock, orders, shipments or suppliers.</Empty>
+              <EmptyState
+                title="Ask about this institution's own stock, orders, shipments or suppliers"
+                hint="Try one of the suggested questions on the right, or type your own below."
+                height={260}
+              />
             ) : (
               turns.map((t, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -70,12 +76,13 @@ export default function AssistantPage() {
                     <div
                       style={{
                         maxWidth: '80%',
-                        borderRadius: 4,
+                        borderRadius: 8,
                         padding: '12px 13px',
                         background: '#F0EEEB',
                         border: '1px solid #E4E2DF',
                         font: `400 13px/1.65 ${FONT}`,
                         color: C.ink,
+                        animation: rise(0),
                       }}
                     >
                       {t.question}
@@ -93,7 +100,7 @@ export default function AssistantPage() {
                       <div
                         style={{
                           maxWidth: '80%',
-                          borderRadius: 4,
+                          borderRadius: 8,
                           padding: '12px 13px',
                           background: C.surface,
                           border: '1px solid #E4E2DF',
@@ -105,27 +112,50 @@ export default function AssistantPage() {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-start', animation: rise(40) }}>
                       <div
                         style={{
-                          maxWidth: '80%',
-                          borderRadius: 4,
-                          padding: '12px 13px',
+                          maxWidth: '92%',
+                          borderRadius: 8,
+                          padding: 0,
                           background: C.surface,
                           border: '1px solid #E4E2DF',
+                          overflow: 'hidden',
+                          boxShadow: '0 1px 2px rgba(23,22,20,.04)',
                         }}
                       >
-                        <div style={{ font: `400 13px/1.65 ${FONT}`, color: C.ink }}>{t.answer.answer}</div>
+                        <div style={{ padding: '13px 14px' }}>
+                          <div style={{ font: `400 13px/1.65 ${FONT}`, color: C.ink }}>{t.answer.answer}</div>
+                        </div>
                         <div
                           style={{
-                            font: `400 11px/1.5 ${MONO}`,
-                            color: C.inkFaint,
-                            marginTop: 10,
-                            paddingTop: 9,
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 8,
+                            padding: '9px 14px 11px',
                             borderTop: `1px solid ${C.borderSoft}`,
+                            background: C.surfaceAlt,
                           }}
                         >
-                          {t.answer.evidence.summary}
+                          <span
+                            style={{
+                              font: `600 9px/1.4 ${MONO}`,
+                              letterSpacing: '.1em',
+                              textTransform: 'uppercase',
+                              color: VIZ.violet,
+                              background: `${VIZ.violet}14`,
+                              border: `1px solid ${VIZ.violet}33`,
+                              borderRadius: 3,
+                              padding: '2px 6px',
+                              flex: '0 0 auto',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            EVIDENCE
+                          </span>
+                          <span style={{ font: `400 11px/1.5 ${MONO}`, color: C.inkFaint }}>
+                            {t.answer.evidence.summary}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -158,35 +188,44 @@ export default function AssistantPage() {
               {busy ? '…' : 'Send'}
             </Button>
           </div>
-        </Card>
+        </Panel>
 
-        <Card style={{ alignSelf: 'start', animation: rise(60) }}>
-          <CardTitle>Try</CardTitle>
-          <div>
-            {PROMPTS.map((p) => (
+        <Panel delayMs={60} style={{ alignSelf: 'start' }}>
+          <PanelTitle>Try</PanelTitle>
+          <div style={{ padding: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {PROMPTS.map((p, i) => (
               <button
                 key={p}
                 onClick={() => void ask(p)}
                 disabled={busy}
                 style={{
-                  display: 'block',
-                  width: '100%',
                   textAlign: 'left',
-                  padding: '16px 18px',
-                  border: 'none',
-                  borderBottom: `1px solid ${C.borderSoft}`,
-                  background: 'transparent',
-                  font: `400 12px/1.5 ${FONT}`,
+                  padding: '9px 12px',
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 999,
+                  background: C.surface,
+                  font: `500 11.5px/1.4 ${FONT}`,
                   color: C.inkMuted,
                   cursor: busy ? 'not-allowed' : 'pointer',
                   opacity: busy ? 0.5 : 1,
+                  animation: rise(i * 40),
+                  transition: 'background .15s ease, border-color .15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  if (busy) return;
+                  e.currentTarget.style.background = C.raised;
+                  e.currentTarget.style.borderColor = C.borderActive;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = C.surface;
+                  e.currentTarget.style.borderColor = C.border;
                 }}
               >
                 {p}
               </button>
             ))}
           </div>
-        </Card>
+        </Panel>
       </div>
     </>
   );
