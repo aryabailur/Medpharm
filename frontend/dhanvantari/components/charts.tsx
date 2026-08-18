@@ -535,16 +535,25 @@ export function Donut({
 /**
  * Bare ring, for callers that render their own legend beside it.
  *
- * Same construction as `Donut` but without the built-in legend or centre
- * total — the RCA dashboard pairs each slice with a narrated insight, so it
- * needs the swatches inline with its own prose.
+ * Same construction as `Donut` but without the built-in legend — the RCA
+ * dashboard pairs each slice with a narrated insight, so it needs the swatches
+ * inline with its own prose.
+ *
+ * Only use this for values that genuinely partition a whole. The centre label
+ * must be supplied by the caller and pre-formatted: summing the raw values
+ * would print a meaningless figure whenever they're currency or percentages
+ * (₹32231327, or 109.4 rendered as a float artifact), and it would silently
+ * overflow the 46px ring. Pass `centre=""` to leave it empty.
  */
 export function PieChart({
   data,
   size = 140,
+  centre,
 }: {
   data: Array<{ label: string; value: number; color: string }>;
   size?: number;
+  /** Pre-formatted centre label. Kept short — the ring is only 46px across. */
+  centre?: string;
 }) {
   const total = data.reduce((a, d) => a + d.value, 0);
   if (total === 0) return <NoData height={size} />;
@@ -580,9 +589,11 @@ export function PieChart({
           acc += frac;
           return seg;
         })}
-      <text x={60} y={65} textAnchor="middle" style={{ font: `600 22px ${MONO}`, fill: C.ink }}>
-        {total}
-      </text>
+      {centre && (
+        <text x={60} y={65} textAnchor="middle" style={{ font: `600 20px ${MONO}`, fill: C.ink }}>
+          {centre}
+        </text>
+      )}
     </svg>
   );
 }
@@ -958,13 +969,22 @@ export function Meter({
 }: {
   pct: number;
   color?: string;
-  width?: number;
+  /** Fixed px width, or 'full' to fill the container. */
+  width?: number | 'full';
   thickness?: number;
   delayMs?: number;
 }) {
   const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const full = width === 'full';
   return (
-    <div style={{ width, height: thickness, background: C.borderSoft, flex: `0 0 ${width}px` }}>
+    <div
+      style={{
+        width: full ? '100%' : width,
+        height: thickness,
+        background: C.borderSoft,
+        flex: full ? '1 1 auto' : `0 0 ${width}px`,
+      }}
+    >
       <div
         style={{
           width: `${clamped}%`,

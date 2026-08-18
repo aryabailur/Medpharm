@@ -74,7 +74,11 @@ export default function Expiring() {
           <CardTitle>Value at risk by window</CardTitle>
           <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 28, alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <PieChart data={buckets} size={140} />
+              <PieChart
+                data={buckets}
+                size={140}
+                centre={rupees(buckets.reduce((a, b) => a + b.value, 0))}
+              />
               <div style={{ display: 'grid', gap: 6 }}>
                 {buckets.map((b) => (
                   <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

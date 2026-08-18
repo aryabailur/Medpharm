@@ -86,6 +86,7 @@ export function RcaDashboard({
             <PieChart
               size={140}
               data={summary.byCategory.map((c, i) => ({ label: c.category, value: c.count, color: PALETTE[i % PALETTE.length] }))}
+              centre={String(summary.byCategory.reduce((a, c) => a + c.count, 0))}
             />
           </div>
           <div style={{ display: 'grid', gap: 8, padding: '0 16px 16px' }}>

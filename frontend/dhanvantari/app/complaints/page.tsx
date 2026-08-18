@@ -104,7 +104,7 @@ export default function Complaints() {
             <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
               <CardTitle>By category</CardTitle>
               <div style={{ padding: 16, display: 'flex', gap: 18, alignItems: 'center' }}>
-                <PieChart data={byCategory} size={130} />
+                <PieChart data={byCategory} size={130} centre={String(byCategory.reduce((a, d) => a + d.value, 0))} />
                 <div style={{ display: 'grid', gap: 6 }}>
                   {byCategory.map((d) => (
                     <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

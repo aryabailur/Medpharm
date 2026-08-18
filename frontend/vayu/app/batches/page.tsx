@@ -94,7 +94,7 @@ export default function Batches() {
                 <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
                   <CardTitle>QC status distribution</CardTitle>
                   <div style={{ padding: 16, display: 'flex', gap: 20, alignItems: 'center' }}>
-                    <PieChart data={qcStatusData} size={140} />
+                    <PieChart data={qcStatusData} size={140} centre={String(batches.length)} />
                     <div style={{ display: 'grid', gap: 6 }}>
                       {qcStatusData.map((d) => (
                         <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

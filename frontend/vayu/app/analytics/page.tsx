@@ -344,6 +344,7 @@ export default function AnalyticsPage() {
                       color: [C.red, C.amber, C.accent, C.green, C.grey][i % 5],
                     }))}
                     size={130}
+                    centre={num(stockHealth.buckets.reduce((a, b) => a + b.count, 0))}
                   />
                   <div style={{ display: 'grid', gap: 6 }}>
                     {stockHealth.buckets.map((b, i) => (
@@ -428,6 +429,7 @@ export default function AnalyticsPage() {
                       color: [C.red, C.amber, C.accent, C.grey][i % 4],
                     }))}
                     size={120}
+                    centre={rupees(expiry.reduce((a, e) => a + e.valueInr, 0))}
                   />
                   <div style={{ display: 'grid', gap: 5 }}>
                     {expiry.map((e, i) => (

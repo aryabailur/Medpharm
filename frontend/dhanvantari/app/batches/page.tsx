@@ -180,7 +180,7 @@ export default function Batches() {
             <Card style={{ animation: 'mtRise .44s cubic-bezier(.16,1,.3,1) both' }}>
               <CardTitle>Batch acceptance</CardTitle>
               <div style={{ padding: 16, display: 'flex', gap: 20, alignItems: 'center' }}>
-                <PieChart data={pieData} size={130} />
+                <PieChart data={pieData} size={130} centre={String(pieData.reduce((a, d) => a + d.value, 0))} />
                 <div style={{ display: 'grid', gap: 8 }}>
                   {pieData.map((d) => (
                     <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
