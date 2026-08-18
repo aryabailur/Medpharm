@@ -34,7 +34,13 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "MedTrack uses the camera to scan batch QR codes and barcodes at receiving."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

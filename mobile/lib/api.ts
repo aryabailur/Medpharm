@@ -164,6 +164,49 @@ export interface TelemetryPoint {
   tempC: number;
 }
 
+export interface ResolvedVayuBatch {
+  batchId: string;
+  lotNumber: string;
+  status: string;
+  mfgDate: string;
+  expiryDate: string;
+  quantity: number;
+  qcStatus: string | null;
+  drug: {
+    id: string;
+    name: string;
+    genericName: string | null;
+    nlemCode: string | null;
+    packSize: string | null;
+    coldChain: boolean;
+    minTempC: number | null;
+    maxTempC: number | null;
+  };
+}
+
+export interface VayuBatchDetail extends VayuBatch {
+  shipmentBatch: Array<{
+    shipmentId: string;
+    shipment: { id: string; status: string; dispatchedAt: string | null; deliveredAt: string | null };
+  }>;
+}
+
+export interface VayuExcursion {
+  id: string;
+  shipmentId: string;
+  startedAt: string;
+  endedAt: string | null;
+  minTempC: number | null;
+  maxTempC: number | null;
+  durationMin: number | null;
+  severity: 'MINOR' | 'MAJOR' | 'CRITICAL';
+  acknowledged: boolean;
+}
+
+export interface VayuShipmentDetail extends VayuShipment {
+  excursions: VayuExcursion[];
+}
+
 // ─── Dhanvantari endpoints ────────────────────────────────────────────────────
 
 export const getInventory = (q = '') =>
@@ -254,3 +297,12 @@ export const getVayuOrders = (q = '') =>
 
 export const getTelemetry = (shipmentId: string) =>
   vayu<{ points: TelemetryPoint[] }>(`/api/telemetry/${shipmentId}`);
+
+export const resolveVayuQr = (qr: string) =>
+  vayu<ResolvedVayuBatch>(`/api/batches/resolve?qr=${encodeURIComponent(qr)}`);
+
+export const getVayuBatch = (id: string) =>
+  vayu<VayuBatchDetail>(`/api/batches/${id}`);
+
+export const getVayuShipment = (id: string) =>
+  vayu<VayuShipmentDetail>(`/api/shipments/${id}`);
