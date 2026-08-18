@@ -247,7 +247,6 @@ function BatchSubRow({
               productName={drugName}
               barcode={batch.qrPayload || batch.lotNumber}
               lotNumber={batch.lotNumber}
-              batchId={batch.id}
             />
           </div>
         </div>

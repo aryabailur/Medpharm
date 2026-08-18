@@ -46,13 +46,6 @@ export function PrintBarcodeButton({
     `
   });
 
-  const qrData = [
-    `Institution: ${institutionName}`,
-    `Med: ${medicineName}`,
-    `Barcode: ${barcode}`,
-    batch ? `Batch: ${batch}` : null,
-  ].filter(Boolean).join("\n");
-
   const iconBtnStyle: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
@@ -171,7 +164,7 @@ export function PrintBarcodeButton({
             {medicineName}
           </div>
           <QRCodeCanvas
-            value={qrData}
+            value={barcode}
             size={36}
             level="M"
             marginSize={0}

@@ -12,7 +12,6 @@ interface PrintBarcodeButtonProps {
   productName: string;
   barcode: string;
   lotNumber?: string;
-  batchId?: string;
 }
 
 export function PrintBarcodeButton({
@@ -20,7 +19,6 @@ export function PrintBarcodeButton({
   productName,
   barcode,
   lotNumber,
-  batchId,
 }: PrintBarcodeButtonProps) {
   const barcodeRef = useRef<HTMLDivElement>(null);
   const qrRef = useRef<HTMLDivElement>(null);
@@ -46,14 +44,6 @@ export function PrintBarcodeButton({
       }
     `
   });
-
-  const qrData = [
-    `Supplier: ${supplierName}`,
-    `Product: ${productName}`,
-    `Barcode: ${barcode}`,
-    lotNumber ? `Lot: ${lotNumber}` : null,
-    batchId ? `Batch: ${batchId}` : null,
-  ].filter(Boolean).join("\n");
 
   const iconBtnStyle: React.CSSProperties = {
     display: "inline-flex",
@@ -173,7 +163,7 @@ export function PrintBarcodeButton({
             {productName}
           </div>
           <QRCodeCanvas
-            value={qrData}
+            value={barcode}
             size={36}
             level="M"
             marginSize={0}
