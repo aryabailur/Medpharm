@@ -15,10 +15,14 @@ import VayuTelemetryScreen from './VayuTelemetryScreen';
 import DhanvantariInventoryScreen from './DhanvantariInventoryScreen';
 import DhanvantariExpiryScreen from './DhanvantariExpiryScreen';
 import DhanvantariIncomingScreen from './DhanvantariIncomingScreen';
+import DhanvantariScanInScreen from './DhanvantariScanInScreen';
+import DhanvantariComplaintsScreen from './DhanvantariComplaintsScreen';
+import DhanvantariPosScreen from './DhanvantariPosScreen';
+import DhanvantariAssistantScreen from './DhanvantariAssistantScreen';
 
 type Role = 'vayu' | 'dhanvantari';
 type DashboardTab = 'overview' | 'queue' | 'insights';
-type DashboardScreen = 'main' | 'orders' | 'batches' | 'shipments' | 'telemetry' | 'inventory' | 'expiry' | 'incoming';
+type DashboardScreen = 'main' | 'orders' | 'batches' | 'shipments' | 'telemetry' | 'inventory' | 'expiry' | 'incoming' | 'scanin' | 'complaints' | 'pos' | 'assistant';
 
 type RoleConfig = {
   id: Role;
@@ -72,8 +76,8 @@ const roleConfig: Record<Role, RoleConfig> = {
 };
 
 const quickActions: Record<Role, string[]> = {
-  vayu: ['Catalog', 'Orders', 'Batches', 'Shipments', 'Telemetry', 'Complaints'],
-  dhanvantari: ['Store Control', 'Inventory', 'Incoming', 'Expiry', 'Consent Queue', 'Complaints'],
+  vayu: ['Orders', 'Batches', 'Shipments', 'Telemetry'],
+  dhanvantari: ['Inventory', 'Incoming', 'Scan-in', 'Expiry', 'Dispensing', 'Complaints', 'Nidana'],
 };
 
 const statusItems: Record<Role, QueueItem[]> = {
@@ -266,21 +270,23 @@ function DashboardMainScreen({ role, onBack, onNavigate }: { role: Role; onBack:
           <View style={styles.quickActionGrid}>
             {quickActions[role].map((action) => {
               const handlePress = () => {
-                if (role === 'vayu' && action === 'Orders') {
-                  onNavigate('orders');
-                } else if (role === 'vayu' && action === 'Batches') {
-                  onNavigate('batches');
-                } else if (role === 'vayu' && action === 'Shipments') {
-                  onNavigate('shipments');
-                } else if (role === 'vayu' && action === 'Telemetry') {
-                  onNavigate('telemetry');
-                } else if (role === 'dhanvantari' && action === 'Inventory') {
-                  onNavigate('inventory');
-                } else if (role === 'dhanvantari' && action === 'Expiry') {
-                  onNavigate('expiry');
-                } else if (role === 'dhanvantari' && action === 'Incoming') {
-                  onNavigate('incoming');
-                }
+                const nav: Record<string, DashboardScreen> = {
+                  // Vayu
+                  'Orders': 'orders',
+                  'Batches': 'batches',
+                  'Shipments': 'shipments',
+                  'Telemetry': 'telemetry',
+                  // Dhanvantari
+                  'Inventory': 'inventory',
+                  'Incoming': 'incoming',
+                  'Scan-in': 'scanin',
+                  'Expiry': 'expiry',
+                  'Dispensing': 'pos',
+                  'Complaints': 'complaints',
+                  'Nidana': 'assistant',
+                };
+                const screen = nav[action];
+                if (screen) onNavigate(screen);
               };
               return (
                 <Pressable key={action} onPress={handlePress} style={[styles.quickAction, { borderColor: config.accent }]}>
@@ -324,49 +330,39 @@ export default function RoleSelectionScreen() {
   const [currentScreen, setCurrentScreen] = useState<DashboardScreen>('main');
 
   if (selectedRole) {
-    // Show Vayu Orders Screen
-    if (selectedRole === 'vayu' && currentScreen === 'orders') {
-      return <VayuOrdersScreen onBack={() => setCurrentScreen('main')} />;
-    }
+    const goMain = () => setCurrentScreen('main');
 
-    // Show Vayu Batches Screen
-    if (selectedRole === 'vayu' && currentScreen === 'batches') {
-      return <VayuBatchesScreen onBack={() => setCurrentScreen('main')} />;
-    }
+    // Vayu screens
+    if (selectedRole === 'vayu' && currentScreen === 'orders')
+      return <VayuOrdersScreen onBack={goMain} />;
+    if (selectedRole === 'vayu' && currentScreen === 'batches')
+      return <VayuBatchesScreen onBack={goMain} />;
+    if (selectedRole === 'vayu' && currentScreen === 'shipments')
+      return <VayuShipmentsScreen onBack={goMain} />;
+    if (selectedRole === 'vayu' && currentScreen === 'telemetry')
+      return <VayuTelemetryScreen onBack={goMain} />;
 
-    // Show Vayu Shipments Screen
-    if (selectedRole === 'vayu' && currentScreen === 'shipments') {
-      return <VayuShipmentsScreen onBack={() => setCurrentScreen('main')} />;
-    }
+    // Dhanvantari screens
+    if (selectedRole === 'dhanvantari' && currentScreen === 'inventory')
+      return <DhanvantariInventoryScreen onBack={goMain} />;
+    if (selectedRole === 'dhanvantari' && currentScreen === 'expiry')
+      return <DhanvantariExpiryScreen onBack={goMain} />;
+    if (selectedRole === 'dhanvantari' && currentScreen === 'incoming')
+      return <DhanvantariIncomingScreen onBack={goMain} onNavigateScanIn={() => setCurrentScreen('scanin')} />;
+    if (selectedRole === 'dhanvantari' && currentScreen === 'scanin')
+      return <DhanvantariScanInScreen onBack={goMain} />;
+    if (selectedRole === 'dhanvantari' && currentScreen === 'complaints')
+      return <DhanvantariComplaintsScreen onBack={goMain} />;
+    if (selectedRole === 'dhanvantari' && currentScreen === 'pos')
+      return <DhanvantariPosScreen onBack={goMain} />;
+    if (selectedRole === 'dhanvantari' && currentScreen === 'assistant')
+      return <DhanvantariAssistantScreen onBack={goMain} />;
 
-    // Show Vayu Telemetry Screen
-    if (selectedRole === 'vayu' && currentScreen === 'telemetry') {
-      return <VayuTelemetryScreen onBack={() => setCurrentScreen('main')} />;
-    }
-
-    // Show Dhanvantari Inventory Screen
-    if (selectedRole === 'dhanvantari' && currentScreen === 'inventory') {
-      return <DhanvantariInventoryScreen onBack={() => setCurrentScreen('main')} />;
-    }
-
-    // Show Dhanvantari Expiry Screen
-    if (selectedRole === 'dhanvantari' && currentScreen === 'expiry') {
-      return <DhanvantariExpiryScreen onBack={() => setCurrentScreen('main')} />;
-    }
-
-    // Show Dhanvantari Incoming Screen
-    if (selectedRole === 'dhanvantari' && currentScreen === 'incoming') {
-      return <DhanvantariIncomingScreen onBack={() => setCurrentScreen('main')} />;
-    }
-
-    // Show main dashboard
+    // Dashboard
     return (
       <DashboardMainScreen
         role={selectedRole}
-        onBack={() => {
-          setSelectedRole(null);
-          setCurrentScreen('main');
-        }}
+        onBack={() => { setSelectedRole(null); setCurrentScreen('main'); }}
         onNavigate={setCurrentScreen}
       />
     );

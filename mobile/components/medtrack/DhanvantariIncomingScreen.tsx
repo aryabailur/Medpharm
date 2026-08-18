@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   SafeAreaView,
@@ -8,345 +9,158 @@ import {
   Text,
   View,
 } from 'react-native';
+import { getIncoming, type IncomingShipment } from '../../lib/api';
+import { useRouter } from 'expo-router';
 
-type IncomingShipment = {
-  id: string;
-  supplier: string;
-  orderValue: string;
-  items: number;
-  eta: string;
-  status: 'IN_TRANSIT' | 'AT_DOCK' | 'DELIVERED' | 'DELAYED';
-  temperature?: number;
-  anomaly: boolean;
-};
-
-const mockShipments: IncomingShipment[] = [
-  {
-    id: 'SHP-4012',
-    supplier: 'Vayu Pharma Ltd',
-    orderValue: '₹12.5L',
-    items: 45,
-    eta: '2026-08-19 14:30',
-    status: 'IN_TRANSIT',
-    temperature: 8.2,
-    anomaly: false,
-  },
-  {
-    id: 'SHP-4001',
-    supplier: 'Sterling Pharma',
-    orderValue: '₹8.3L',
-    items: 28,
-    eta: '2026-08-19 16:00',
-    status: 'AT_DOCK',
-    temperature: 9.1,
-    anomaly: false,
-  },
-  {
-    id: 'SHP-3998',
-    supplier: 'Aurobindo Pharma',
-    orderValue: '₹5.6L',
-    items: 18,
-    eta: '2026-08-19 18:00',
-    status: 'IN_TRANSIT',
-    temperature: 25.5,
-    anomaly: true,
-  },
-  {
-    id: 'SHP-3985',
-    supplier: 'Cipla Ltd',
-    orderValue: '₹18.2L',
-    items: 62,
-    eta: '2026-08-21 10:00',
-    status: 'DELAYED',
-    temperature: 7.8,
-    anomaly: false,
-  },
-  {
-    id: 'SHP-3972',
-    supplier: 'Lupin Ltd',
-    orderValue: '₹9.4L',
-    items: 34,
-    eta: '2026-08-18 11:00',
-    status: 'DELIVERED',
-    temperature: 8.0,
-    anomaly: false,
-  },
-];
-
-const statusColors: Record<IncomingShipment['status'], string> = {
-  IN_TRANSIT: '#0EA5E9',
-  AT_DOCK: '#F59E0B',
+const STATUS_COLORS: Record<string, string> = {
+  PENDING: '#94A3B8',
+  DISPATCHED: '#0EA5E9',
+  IN_TRANSIT: '#1F6FEB',
+  OUT_FOR_DELIVERY: '#8B5CF6',
   DELIVERED: '#22C55E',
-  DELAYED: '#EF4444',
 };
 
-const statusLabels: Record<IncomingShipment['status'], string> = {
-  IN_TRANSIT: 'In Transit',
-  AT_DOCK: 'At Dock',
-  DELIVERED: 'Delivered',
-  DELAYED: 'Delayed',
-};
+function fmtDate(d: string | null) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
 
-type ShipmentRow = IncomingShipment;
+function ShipmentCard({ s, onScanIn }: { s: IncomingShipment; onScanIn: () => void }) {
+  const statusColor = STATUS_COLORS[s.status] ?? '#94A3B8';
+  const pct = Math.round((s.progressPct ?? 0) * 100);
+  const inTransit = !['DELIVERED', 'PENDING'].includes(s.status);
 
-function ShipmentRow({ shipment, onPress }: { shipment: ShipmentRow; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.shipmentRow, pressed && { backgroundColor: '#FFF9F3' }]}>
-      <View style={styles.shipmentLeftColumn}>
-        <Text style={styles.shipmentId}>{shipment.id}</Text>
-        <Text style={styles.supplierName}>{shipment.supplier}</Text>
-        <Text style={styles.orderValue}>{shipment.orderValue}</Text>
-      </View>
-
-      <View style={styles.shipmentMiddleColumn}>
-        <Text style={styles.columnLabel}>Items</Text>
-        <Text style={styles.columnValue}>{shipment.items}</Text>
-      </View>
-
-      <View style={styles.shipmentTempColumn}>
-        <Text style={styles.columnLabel}>Temp</Text>
-        <Text style={[styles.tempValue, shipment.anomaly && { color: '#EF4444' }]}>
-          {shipment.temperature}°C
-        </Text>
-        {shipment.anomaly && <Text style={styles.anomalyWarning}>⚠ Alert</Text>}
-      </View>
-
-      <View style={styles.statusColumn}>
-        <View style={[styles.statusBadge, { backgroundColor: statusColors[shipment.status] }]}>
-          <Text style={styles.statusText}>{statusLabels[shipment.status]}</Text>
+    <View style={[styles.card, s.anomalyFlag && styles.cardExcursion]}>
+      {s.anomalyFlag && (
+        <View style={styles.excursionBanner}>
+          <Text style={styles.excursionText}>⚠ Cold-chain excursion — inspect before accepting</Text>
+        </View>
+      )}
+      <View style={styles.cardHeader}>
+        <Text style={styles.shipId} numberOfLines={1}>{s.id.slice(0, 16)}</Text>
+        <View style={[styles.badge, { backgroundColor: s.anomalyFlag ? '#EF4444' : statusColor }]}>
+          <Text style={styles.badgeText}>{s.anomalyFlag ? 'EXCURSION' : s.status}</Text>
         </View>
       </View>
-    </Pressable>
+      {s.supplyOrderId && <Text style={styles.orderId}>Order {s.supplyOrderId.slice(0, 12)}</Text>}
+
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${pct}%` as any, backgroundColor: s.anomalyFlag ? '#EF4444' : statusColor }]} />
+      </View>
+
+      <View style={styles.metaRow}>
+        <Text style={styles.meta}>{s.coldChain ? '❄ Cold chain' : 'Ambient'}</Text>
+        {s.lastTempC != null && (
+          <Text style={[styles.temp, s.anomalyFlag && { color: '#EF4444' }]}>
+            {s.lastTempC.toFixed(1)} °C
+          </Text>
+        )}
+        <Text style={styles.eta}>{s.status === 'DELIVERED' ? 'Delivered' : `ETA ${fmtDate(s.etaAt)}`}</Text>
+      </View>
+
+      {inTransit && s.status === 'OUT_FOR_DELIVERY' && (
+        <Pressable onPress={onScanIn} style={styles.scanBtn}>
+          <Text style={styles.scanText}>📷  Scan-in at dock</Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
-export default function DhanvantariIncomingScreen({ onBack }: { onBack: () => void }) {
-  const [filterStatus, setFilterStatus] = useState<IncomingShipment['status'] | 'ALL'>('ALL');
+export default function DhanvantariIncomingScreen({ onBack, onNavigateScanIn }: {
+  onBack: () => void;
+  onNavigateScanIn?: () => void;
+}) {
+  const [items, setItems] = useState<IncomingShipment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredShipments = useMemo(() => {
-    return mockShipments.filter((s) => {
-      if (filterStatus === 'ALL') return true;
-      return s.status === filterStatus;
-    });
-  }, [filterStatus]);
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await getIncoming();
+      setItems(res.items);
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  }, []);
 
-  const statusTabs = ['ALL', 'IN_TRANSIT', 'AT_DOCK', 'DELIVERED', 'DELAYED'] as const;
-  const anomalyCount = mockShipments.filter((s) => s.anomaly).length;
+  useEffect(() => { load(); }, [load]);
+
+  const excursions = items.filter(s => s.anomalyFlag).length;
+  const active = items.filter(s => s.status !== 'DELIVERED').length;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFF4E5" />
-
       <View style={styles.header}>
-        <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Back</Text>
+        <Pressable onPress={onBack} style={styles.backBtn}>
+          <Text style={styles.backText}>← Back</Text>
         </Pressable>
-        <View>
-          <Text style={styles.headerTitle}>Incoming Shipments</Text>
-          <Text style={styles.headerSubtitle}>Dhanvantari • Institution</Text>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.title}>Incoming</Text>
+            <Text style={styles.subtitle}>{active} active shipment{active !== 1 ? 's' : ''}</Text>
+          </View>
+          {excursions > 0 && (
+            <View style={styles.alertBadge}>
+              <Text style={styles.alertText}>⚠ {excursions} excursion</Text>
+            </View>
+          )}
         </View>
       </View>
 
-      {anomalyCount > 0 && (
-        <View style={styles.alertBanner}>
-          <Text style={styles.alertBannerText}>⚠ {anomalyCount} temperature alert(s) detected</Text>
+      {loading ? (
+        <View style={styles.center}><ActivityIndicator color="#D97706" size="large" /></View>
+      ) : error ? (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>⚠ {error}</Text>
+          <Pressable onPress={load} style={styles.retryBtn}><Text style={styles.retryText}>Retry</Text></Pressable>
         </View>
+      ) : items.length === 0 ? (
+        <View style={styles.center}><Text style={styles.emptyText}>No incoming shipments.</Text></View>
+      ) : (
+        <FlatList data={items} keyExtractor={s => s.id}
+          renderItem={({ item }) => (
+            <ShipmentCard s={item} onScanIn={() => onNavigateScanIn?.()} />
+          )}
+          contentContainerStyle={styles.list} refreshing={loading} onRefresh={load} />
       )}
-
-      <View style={styles.filterBar}>
-        {statusTabs.map((status) => (
-          <Pressable
-            key={status}
-            onPress={() => setFilterStatus(status)}
-            style={[styles.filterTab, filterStatus === status && styles.filterTabActive]}
-          >
-            <Text style={[styles.filterTabText, filterStatus === status && styles.filterTabTextActive]}>
-              {status === 'ALL' ? 'ALL' : statusLabels[status]}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <FlatList
-        data={filteredShipments}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <ShipmentRow shipment={item} onPress={() => {}} />}
-        contentContainerStyle={styles.listContent}
-        scrollEnabled={true}
-      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F5F7FA',
-  },
-  header: {
-    backgroundColor: '#FFF4E5',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEDCB4',
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    marginBottom: 8,
-  },
-  backButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#D97706',
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#111827',
-    letterSpacing: -0.5,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#475467',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginTop: 4,
-  },
-  alertBanner: {
-    backgroundColor: '#FEF3C7',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEDCB4',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  alertBannerText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#92400E',
-  },
-  filterBar: {
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#F5F7FA',
-  },
-  filterTab: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#D8E1EC',
-    borderRadius: 10,
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    backgroundColor: '#FFFFFF',
-  },
-  filterTabActive: {
-    backgroundColor: '#FFF4E5',
-    borderColor: '#D97706',
-  },
-  filterTabText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#526274',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    textAlign: 'center',
-  },
-  filterTabTextActive: {
-    color: '#D97706',
-  },
-  listContent: {
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-  },
-  shipmentRow: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    marginHorizontal: 8,
-    marginVertical: 6,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    flexDirection: 'row',
-    gap: 10,
-  },
-  shipmentLeftColumn: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  shipmentMiddleColumn: {
-    alignItems: 'center',
-    minWidth: 60,
-    justifyContent: 'center',
-  },
-  shipmentTempColumn: {
-    alignItems: 'center',
-    minWidth: 70,
-    justifyContent: 'center',
-  },
-  statusColumn: {
-    justifyContent: 'center',
-    minWidth: 90,
-  },
-  shipmentId: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.1,
-    color: '#64748B',
-    textTransform: 'uppercase',
-    marginBottom: 3,
-  },
-  supplierName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111827',
-    letterSpacing: -0.2,
-  },
-  orderValue: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 3,
-  },
-  columnLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.1,
-    color: '#64748B',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  columnValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-  },
-  tempValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#22C55E',
-    textAlign: 'center',
-  },
-  anomalyWarning: {
-    fontSize: 8,
-    fontWeight: '700',
-    color: '#EF4444',
-    marginTop: 2,
-  },
-  statusBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  statusText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    textAlign: 'center',
-  },
+  safe: { flex: 1, backgroundColor: '#F5F7FA' },
+  header: { backgroundColor: '#FFF4E5', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F5D9A0' },
+  backBtn: { alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 8, marginBottom: 8 },
+  backText: { fontSize: 14, fontWeight: '700', color: '#D97706' },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  title: { fontSize: 24, fontWeight: '800', color: '#111827', letterSpacing: -0.5 },
+  subtitle: { fontSize: 12, fontWeight: '700', color: '#475467', textTransform: 'uppercase', letterSpacing: 1, marginTop: 4 },
+  alertBadge: { backgroundColor: '#EF4444', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  alertText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  list: { padding: 8 },
+  card: { backgroundColor: '#fff', borderRadius: 14, marginHorizontal: 8, marginVertical: 6, padding: 14, borderWidth: 1, borderColor: '#E2E8F0' },
+  cardExcursion: { borderColor: '#FCA5A5', borderLeftWidth: 3, borderLeftColor: '#EF4444' },
+  excursionBanner: { backgroundColor: '#FEE2E2', borderRadius: 8, padding: 8, marginBottom: 10 },
+  excursionText: { color: '#DC2626', fontWeight: '700', fontSize: 12 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  shipId: { fontSize: 13, fontWeight: '700', color: '#111827', fontFamily: 'monospace', flex: 1 },
+  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 8 },
+  badgeText: { fontSize: 9, fontWeight: '700', color: '#fff', textTransform: 'uppercase', letterSpacing: 0.8 },
+  orderId: { fontSize: 11, color: '#94A3B8', fontFamily: 'monospace', marginBottom: 8 },
+  progressTrack: { height: 5, backgroundColor: '#E2E8F0', borderRadius: 3, overflow: 'hidden', marginVertical: 8 },
+  progressFill: { height: 5, borderRadius: 3 },
+  metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  meta: { fontSize: 12, color: '#6B7280' },
+  temp: { fontSize: 13, fontWeight: '700', color: '#0EA5E9' },
+  eta: { fontSize: 12, color: '#6B7280' },
+  scanBtn: { backgroundColor: '#111827', borderRadius: 10, padding: 11, alignItems: 'center', marginTop: 10 },
+  scanText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  errorText: { fontSize: 13, color: '#EF4444', textAlign: 'center' },
+  emptyText: { fontSize: 14, color: '#94A3B8' },
+  retryBtn: { backgroundColor: '#D97706', borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10 },
+  retryText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });

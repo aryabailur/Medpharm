@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   SafeAreaView,
@@ -9,335 +10,159 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { getVayuBatches, type VayuBatch } from '../../lib/api';
 
-type Batch = {
-  id: string;
-  productName: string;
-  batchNo: string;
-  quantity: number;
-  status: 'PENDING_QC' | 'PASSED_QC' | 'FAILED_QC' | 'APPROVED';
-  qcDate: string;
-  passRate: number;
-};
-
-const mockBatches: Batch[] = [
-  { id: 'B-1201', productName: 'Paracetamol 500mg', batchNo: 'PAR-2024-045', quantity: 5000, status: 'PENDING_QC', qcDate: '2026-08-18', passRate: 0 },
-  { id: 'B-1199', productName: 'Amoxicillin 500mg', batchNo: 'AMX-2024-032', quantity: 2000, status: 'PASSED_QC', qcDate: '2026-08-17', passRate: 98 },
-  { id: 'B-1188', productName: 'IV Fluids 500ml', batchNo: 'IVF-2024-008', quantity: 1000, status: 'APPROVED', qcDate: '2026-08-15', passRate: 100 },
-  { id: 'B-1175', productName: 'Syringes 5ml', batchNo: 'SYR-2024-156', quantity: 50000, status: 'PASSED_QC', qcDate: '2026-08-14', passRate: 99 },
-  { id: 'B-1164', productName: 'Bandage rolls', batchNo: 'BND-2024-089', quantity: 3000, status: 'FAILED_QC', qcDate: '2026-08-12', passRate: 85 },
-];
-
-const statusColors: Record<Batch['status'], string> = {
+const STATUS_COLORS: Record<string, string> = {
+  MANUFACTURED: '#94A3B8',
   PENDING_QC: '#EAB308',
   PASSED_QC: '#22C55E',
   FAILED_QC: '#EF4444',
-  APPROVED: '#0EA5E9',
+  RELEASED: '#0EA5E9',
+  SHIPPED: '#8B5CF6',
 };
 
-const statusLabels: Record<Batch['status'], string> = {
-  PENDING_QC: 'Pending QC',
-  PASSED_QC: 'Passed QC',
-  FAILED_QC: 'Failed QC',
-  APPROVED: 'Approved',
-};
+function fmtDate(d: string) {
+  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
+}
 
-type BatchRow = Batch;
+function BatchCard({ batch }: { batch: VayuBatch }) {
+  const qc = batch.qcRecords[0];
+  const statusColor = STATUS_COLORS[batch.status] ?? '#94A3B8';
+  const expiryDays = Math.floor((new Date(batch.expiryDate).getTime() - Date.now()) / 86400000);
+  const expiryWarn = expiryDays < 90;
 
-function BatchRow({ batch, onPress }: { batch: BatchRow; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.batchRow, pressed && { backgroundColor: '#F8FAFC' }]}>
-      <View style={styles.batchLeftColumn}>
-        <Text style={styles.batchId}>{batch.id}</Text>
-        <Text style={styles.productName}>{batch.productName}</Text>
-        <Text style={styles.batchNo}>Batch {batch.batchNo}</Text>
-      </View>
-
-      <View style={styles.batchMiddleColumn}>
-        <Text style={styles.columnLabel}>Quantity</Text>
-        <Text style={styles.columnValue}>{batch.quantity.toLocaleString()}</Text>
-      </View>
-
-      <View style={styles.batchRightColumn}>
-        <Text style={styles.columnLabel}>Pass rate</Text>
-        <Text style={[styles.columnValue, { color: batch.passRate > 95 ? '#22C55E' : '#F59E0B' }]}>
-          {batch.passRate > 0 ? `${batch.passRate}%` : '—'}
-        </Text>
-      </View>
-
-      <View style={styles.statusColumn}>
-        <View style={[styles.statusBadge, { backgroundColor: statusColors[batch.status] }]}>
-          <Text style={styles.statusText}>{statusLabels[batch.status]}</Text>
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.drugName} numberOfLines={1}>{batch.drug.name}</Text>
+        <View style={[styles.badge, { backgroundColor: statusColor }]}>
+          <Text style={styles.badgeText}>{batch.status.replace('_', ' ')}</Text>
         </View>
       </View>
-    </Pressable>
+      <Text style={styles.lotNumber}>{batch.lotNumber}</Text>
+      <View style={styles.grid}>
+        <View style={styles.gridItem}>
+          <Text style={styles.gridLabel}>Quantity</Text>
+          <Text style={styles.gridValue}>{batch.quantity.toLocaleString('en-IN')}</Text>
+        </View>
+        <View style={styles.gridItem}>
+          <Text style={styles.gridLabel}>QC Result</Text>
+          <Text style={[styles.gridValue, { color: qc?.result === 'FAIL' ? '#EF4444' : '#22C55E' }]}>
+            {qc?.result ?? 'Pending'}
+          </Text>
+        </View>
+        <View style={styles.gridItem}>
+          <Text style={styles.gridLabel}>Expiry</Text>
+          <Text style={[styles.gridValue, expiryWarn && { color: '#EAB308' }]}>
+            {fmtDate(batch.expiryDate)}
+          </Text>
+        </View>
+        <View style={styles.gridItem}>
+          <Text style={styles.gridLabel}>Cold chain</Text>
+          <Text style={[styles.gridValue, { color: batch.drug.coldChain ? '#0EA5E9' : '#94A3B8' }]}>
+            {batch.drug.coldChain ? '2–8 °C' : 'Ambient'}
+          </Text>
+        </View>
+      </View>
+    </View>
   );
 }
 
 export default function VayuBatchesScreen({ onBack }: { onBack: () => void }) {
-  const [searchText, setSearchText] = useState('');
-  const [filterStatus, setFilterStatus] = useState<Batch['status'] | 'ALL'>('ALL');
+  const [batches, setBatches] = useState<VayuBatch[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('ALL');
 
-  const filteredBatches = useMemo(() => {
-    return mockBatches.filter((batch) => {
-      const matchesSearch =
-        batch.id.toLowerCase().includes(searchText.toLowerCase()) ||
-        batch.productName.toLowerCase().includes(searchText.toLowerCase()) ||
-        batch.batchNo.toLowerCase().includes(searchText.toLowerCase());
-      const matchesStatus = filterStatus === 'ALL' || batch.status === filterStatus;
-      return matchesSearch && matchesStatus;
-    });
-  }, [searchText, filterStatus]);
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await getVayuBatches('?take=100');
+      setBatches(res.items);
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  }, []);
 
-  const statusTabs = ['ALL', 'PENDING_QC', 'PASSED_QC', 'FAILED_QC', 'APPROVED'] as const;
-  const pendingCount = mockBatches.filter((b) => b.status === 'PENDING_QC').length;
-  const passedCount = mockBatches.filter((b) => b.status === 'PASSED_QC').length;
+  useEffect(() => { load(); }, [load]);
+
+  const statuses = useMemo(() => ['ALL', ...new Set(batches.map(b => b.status))], [batches]);
+
+  const filtered = useMemo(() =>
+    batches.filter(b => {
+      const matchSearch = b.drug.name.toLowerCase().includes(search.toLowerCase()) ||
+        b.lotNumber.toLowerCase().includes(search.toLowerCase());
+      const matchFilter = filter === 'ALL' || b.status === filter;
+      return matchSearch && matchFilter;
+    }), [batches, search, filter]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor="#EAF2FF" />
-
       <View style={styles.header}>
-        <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Back</Text>
+        <Pressable onPress={onBack} style={styles.backBtn}>
+          <Text style={styles.backText}>← Back</Text>
         </Pressable>
-        <View>
-          <Text style={styles.headerTitle}>Batches & QC</Text>
-          <Text style={styles.headerSubtitle}>Vayu • Manufacturer</Text>
-        </View>
+        <Text style={styles.title}>Batch Catalogue</Text>
+        <Text style={styles.subtitle}>Vayu · {batches.length} batches</Text>
       </View>
 
-      <View style={styles.qcBand}>
-        <View style={[styles.qcCard, { backgroundColor: '#FEF3C7' }]}>
-          <Text style={styles.qcLabel}>Awaiting QC</Text>
-          <Text style={[styles.qcValue, { color: '#EAB308' }]}>{pendingCount}</Text>
-        </View>
-        <View style={[styles.qcCard, { backgroundColor: '#DCFCE7' }]}>
-          <Text style={styles.qcLabel}>Passed QC</Text>
-          <Text style={[styles.qcValue, { color: '#22C55E' }]}>{passedCount}</Text>
-        </View>
-      </View>
-
-      <View style={styles.searchBar}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by batch ID or product…"
-          placeholderTextColor="#A0AEC0"
-          value={searchText}
-          onChangeText={setSearchText}
-        />
-      </View>
+      <TextInput style={styles.search} placeholder="Search drug or lot number…" placeholderTextColor="#94A3B8"
+        value={search} onChangeText={setSearch} />
 
       <View style={styles.filterBar}>
-        {statusTabs.map((status) => (
-          <Pressable
-            key={status}
-            onPress={() => setFilterStatus(status)}
-            style={[styles.filterTab, filterStatus === status && styles.filterTabActive]}
-          >
-            <Text style={[styles.filterTabText, filterStatus === status && styles.filterTabTextActive]}>
-              {status === 'ALL' ? 'ALL' : statusLabels[status]}
+        {statuses.map(s => (
+          <Pressable key={s} onPress={() => setFilter(s)}
+            style={[styles.filterTab, filter === s && styles.filterTabActive]}>
+            <Text style={[styles.filterText, filter === s && styles.filterTextActive]}>
+              {s.replace('_', ' ')}
             </Text>
           </Pressable>
         ))}
       </View>
 
-      <FlatList
-        data={filteredBatches}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <BatchRow batch={item} onPress={() => {}} />}
-        contentContainerStyle={styles.listContent}
-        scrollEnabled={true}
-      />
+      {loading ? (
+        <View style={styles.center}><ActivityIndicator color="#1F6FEB" size="large" /></View>
+      ) : error ? (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>⚠ {error}</Text>
+          <Pressable onPress={load} style={styles.retryBtn}><Text style={styles.retryText}>Retry</Text></Pressable>
+        </View>
+      ) : (
+        <FlatList data={filtered} keyExtractor={b => b.id}
+          renderItem={({ item }) => <BatchCard batch={item} />}
+          contentContainerStyle={styles.list} refreshing={loading} onRefresh={load} />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F5F7FA',
-  },
-  header: {
-    backgroundColor: '#EAF2FF',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#D8E1EC',
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    marginBottom: 8,
-  },
-  backButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F6FEB',
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#111827',
-    letterSpacing: -0.5,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#475467',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginTop: 4,
-  },
-  qcBand: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#F5F7FA',
-  },
-  qcCard: {
-    flex: 1,
-    borderRadius: 14,
-    padding: 14,
-  },
-  qcLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    color: '#475467',
-    textTransform: 'uppercase',
-  },
-  qcValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    marginTop: 8,
-    letterSpacing: -0.5,
-  },
-  searchBar: {
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 8,
-    backgroundColor: '#F5F7FA',
-  },
-  searchInput: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D8E1EC',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#111827',
-  },
-  filterBar: {
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#F5F7FA',
-  },
-  filterTab: {
-    borderWidth: 1,
-    borderColor: '#D8E1EC',
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    backgroundColor: '#FFFFFF',
-  },
-  filterTabActive: {
-    backgroundColor: '#EAF2FF',
-    borderColor: '#1F6FEB',
-  },
-  filterTabText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#526274',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    textAlign: 'center',
-  },
-  filterTabTextActive: {
-    color: '#1F6FEB',
-  },
-  listContent: {
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-  },
-  batchRow: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    marginHorizontal: 8,
-    marginVertical: 6,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    flexDirection: 'row',
-    gap: 10,
-  },
-  batchLeftColumn: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  batchMiddleColumn: {
-    alignItems: 'center',
-    minWidth: 70,
-    justifyContent: 'center',
-  },
-  batchRightColumn: {
-    alignItems: 'center',
-    minWidth: 70,
-    justifyContent: 'center',
-  },
-  statusColumn: {
-    justifyContent: 'center',
-    minWidth: 90,
-  },
-  batchId: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.1,
-    color: '#64748B',
-    textTransform: 'uppercase',
-    marginBottom: 3,
-  },
-  productName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111827',
-    letterSpacing: -0.2,
-  },
-  batchNo: {
-    fontSize: 10,
-    color: '#64748B',
-    marginTop: 3,
-  },
-  columnLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.1,
-    color: '#64748B',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  columnValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-  },
-  statusBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  statusText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    textAlign: 'center',
-  },
+  safe: { flex: 1, backgroundColor: '#F5F7FA' },
+  header: { backgroundColor: '#EAF2FF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#D8E1EC' },
+  backBtn: { alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 8, marginBottom: 8 },
+  backText: { fontSize: 14, fontWeight: '700', color: '#1F6FEB' },
+  title: { fontSize: 24, fontWeight: '800', color: '#111827', letterSpacing: -0.5 },
+  subtitle: { fontSize: 12, fontWeight: '700', color: '#475467', textTransform: 'uppercase', letterSpacing: 1, marginTop: 4 },
+  search: { margin: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#D8E1EC', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: '#111827' },
+  filterBar: { flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingBottom: 10, flexWrap: 'wrap' },
+  filterTab: { borderWidth: 1, borderColor: '#D8E1EC', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#fff' },
+  filterTabActive: { backgroundColor: '#EAF2FF', borderColor: '#1F6FEB' },
+  filterText: { fontSize: 10, fontWeight: '700', color: '#526274', textTransform: 'uppercase', letterSpacing: 0.8 },
+  filterTextActive: { color: '#1F6FEB' },
+  list: { padding: 8 },
+  card: { backgroundColor: '#fff', borderRadius: 14, marginHorizontal: 8, marginVertical: 6, padding: 14, borderWidth: 1, borderColor: '#E2E8F0' },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  drugName: { fontSize: 15, fontWeight: '700', color: '#111827', flex: 1 },
+  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 8 },
+  badgeText: { fontSize: 9, fontWeight: '700', color: '#fff', textTransform: 'uppercase', letterSpacing: 0.8 },
+  lotNumber: { fontSize: 12, color: '#6B7280', fontFamily: 'monospace', marginBottom: 10 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  gridItem: { width: '48%' },
+  gridLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
+  gridValue: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  errorText: { fontSize: 13, color: '#EF4444', textAlign: 'center' },
+  retryBtn: { backgroundColor: '#1F6FEB', borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10 },
+  retryText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });

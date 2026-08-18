@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   SafeAreaView,
@@ -9,369 +10,217 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { getInventory, reorder, type InventoryRow } from '../../lib/api';
 
-type Drug = {
-  id: string;
-  name: string;
-  unitPrice: number;
-  onHand: number;
-  reorderPoint: number;
-  daysToExpiry: number;
-};
+type StockStatus = 'critical' | 'low' | 'expiring' | 'ok';
 
-const mockDrugs: Drug[] = [
-  { id: 'D-001', name: 'Paracetamol 500mg', unitPrice: 12, onHand: 450, reorderPoint: 200, daysToExpiry: 85 },
-  { id: 'D-002', name: 'Syringe 5ml', unitPrice: 8, onHand: 12, reorderPoint: 100, daysToExpiry: 365 },
-  { id: 'D-003', name: 'IV Fluids 500ml', unitPrice: 45, onHand: 67, reorderPoint: 50, daysToExpiry: 12 },
-  { id: 'D-004', name: 'Amoxicillin 500mg', unitPrice: 18, onHand: 0, reorderPoint: 150, daysToExpiry: 120 },
-  { id: 'D-005', name: 'Aspirin 100mg', unitPrice: 6, onHand: 280, reorderPoint: 100, daysToExpiry: 45 },
-  { id: 'D-006', name: 'Bandages box', unitPrice: 25, onHand: 15, reorderPoint: 30, daysToExpiry: 365 },
-];
-
-function getStockStatus(drug: Drug): 'critical' | 'low' | 'expiring' | 'ok' {
-  if (drug.onHand === 0) return 'critical';
-  if (drug.daysToExpiry < 30) return 'expiring';
-  if (drug.onHand < drug.reorderPoint) return 'low';
-  return 'ok';
-}
-
-const statusColors: Record<ReturnType<typeof getStockStatus>, string> = {
+const STATUS_COLORS: Record<StockStatus, string> = {
   critical: '#EF4444',
   low: '#F59E0B',
   expiring: '#1F6FEB',
   ok: '#22C55E',
 };
-
-const statusLabels: Record<ReturnType<typeof getStockStatus>, string> = {
-  critical: 'Out of Stock',
-  low: 'Low Stock',
-  expiring: 'Expiring Soon',
-  ok: 'In Stock',
+const STATUS_LABELS: Record<StockStatus, string> = {
+  critical: 'Out of stock',
+  low: 'Low stock',
+  expiring: 'Expiring',
+  ok: 'In stock',
 };
 
-type InventoryRow = Drug;
+function getStatus(row: InventoryRow): StockStatus {
+  if (row.qtyOnHand === 0) return 'critical';
+  if (row.daysToExpiry != null && row.daysToExpiry <= 30) return 'expiring';
+  if (row.lowStock) return 'low';
+  return 'ok';
+}
 
-function InventoryRow({ drug, onPress }: { drug: InventoryRow; onPress: () => void }) {
-  const status = getStockStatus(drug);
-  const stockValue = drug.onHand * drug.unitPrice;
+function InventoryCard({ row, onReorder }: { row: InventoryRow; onReorder: () => void }) {
+  const status = getStatus(row);
+  const color = STATUS_COLORS[status];
+  const pct = row.reorderPoint > 0 ? Math.min(100, (row.qtyOnHand / row.reorderPoint) * 100) : 100;
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.inventoryRow, pressed && { backgroundColor: '#FFF9F3' }]}>
-      <View style={styles.drugInfo}>
-        <Text style={styles.drugId}>{drug.id}</Text>
-        <Text style={styles.drugName}>{drug.name}</Text>
-        <Text style={styles.drugSubtext}>₹{stockValue.toLocaleString()} on hand</Text>
-      </View>
-
-      <View style={styles.stockColumn}>
-        <Text style={styles.columnLabel}>Stock</Text>
-        <Text style={styles.columnValue}>{drug.onHand}</Text>
-        <Text style={styles.columnSubtext}>vs {drug.reorderPoint} reorder</Text>
-      </View>
-
-      <View style={styles.expiryColumn}>
-        <Text style={styles.columnLabel}>Expiry</Text>
-        <Text style={styles.columnValue}>{drug.daysToExpiry}d</Text>
-        <Text style={styles.columnSubtext}>until expiry</Text>
-      </View>
-
-      <View style={styles.statusColumn}>
-        <View style={[styles.statusBadge, { backgroundColor: statusColors[status] }]}>
-          <Text style={styles.statusText}>{statusLabels[status]}</Text>
+    <View style={[styles.card, status !== 'ok' && { borderLeftWidth: 3, borderLeftColor: color }]}>
+      <View style={styles.cardHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.drugName} numberOfLines={1}>{row.drug.name}</Text>
+          <Text style={styles.generic} numberOfLines={1}>{row.drug.genericName ?? row.drug.nlemCode ?? '—'}</Text>
+        </View>
+        <View style={[styles.badge, { backgroundColor: color }]}>
+          <Text style={styles.badgeText}>{STATUS_LABELS[status]}</Text>
         </View>
       </View>
-    </Pressable>
+
+      <View style={styles.statsRow}>
+        <View style={styles.stat}>
+          <Text style={styles.statLabel}>On hand</Text>
+          <Text style={[styles.statValue, { color }]}>{row.qtyOnHand.toLocaleString('en-IN')}</Text>
+        </View>
+        <View style={styles.stat}>
+          <Text style={styles.statLabel}>Reorder pt</Text>
+          <Text style={styles.statValue}>{row.reorderPoint.toLocaleString('en-IN')}</Text>
+        </View>
+        {row.daysToExpiry != null && (
+          <View style={styles.stat}>
+            <Text style={styles.statLabel}>Expires in</Text>
+            <Text style={[styles.statValue, row.daysToExpiry <= 30 && { color: '#EF4444' }]}>
+              {row.daysToExpiry}d
+            </Text>
+          </View>
+        )}
+        {row.drug.coldChain && (
+          <View style={[styles.badge, { backgroundColor: '#E0F2FE', alignSelf: 'flex-end' }]}>
+            <Text style={[styles.badgeText, { color: '#0EA5E9' }]}>2–8 °C</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${pct}%` as any, backgroundColor: color }]} />
+      </View>
+
+      {status !== 'ok' && (
+        <Pressable onPress={onReorder} style={styles.reorderBtn}>
+          <Text style={styles.reorderText}>One-tap reorder</Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
 export default function DhanvantariInventoryScreen({ onBack }: { onBack: () => void }) {
-  const [searchText, setSearchText] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'ALL' | ReturnType<typeof getStockStatus>>('ALL');
+  const [items, setItems] = useState<InventoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('ALL');
+  const [reordering, setReordering] = useState<string | null>(null);
+  const [reorderMsg, setReorderMsg] = useState<string | null>(null);
 
-  const filteredDrugs = useMemo(() => {
-    return mockDrugs.filter((drug) => {
-      const matchesSearch =
-        drug.id.toLowerCase().includes(searchText.toLowerCase()) ||
-        drug.name.toLowerCase().includes(searchText.toLowerCase());
-      const matchesStatus = filterStatus === 'ALL' || getStockStatus(drug) === filterStatus;
-      return matchesSearch && matchesStatus;
-    });
-  }, [searchText, filterStatus]);
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await getInventory('?take=200');
+      setItems(res.items);
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  }, []);
 
-  const statusTabs = ['ALL', 'critical', 'low', 'expiring', 'ok'] as const;
+  useEffect(() => { load(); }, [load]);
 
-  const totalValue = mockDrugs.reduce((sum, d) => sum + d.onHand * d.unitPrice, 0);
-  const lowCount = mockDrugs.filter((d) => getStockStatus(d) === 'low').length;
-  const expiringCount = mockDrugs.filter((d) => getStockStatus(d) === 'expiring').length;
-  const criticalCount = mockDrugs.filter((d) => getStockStatus(d) === 'critical').length;
+  const filtered = useMemo(() => {
+    let list = items;
+    if (filter === 'low') list = list.filter(r => r.lowStock);
+    else if (filter === 'critical') list = list.filter(r => r.qtyOnHand === 0);
+    else if (filter === 'expiring') list = list.filter(r => r.daysToExpiry != null && r.daysToExpiry <= 90);
+    else if (filter === 'cold') list = list.filter(r => r.drug.coldChain);
+    if (search) list = list.filter(r =>
+      r.drug.name.toLowerCase().includes(search.toLowerCase()) ||
+      (r.drug.genericName ?? '').toLowerCase().includes(search.toLowerCase()));
+    return list;
+  }, [items, filter, search]);
+
+  const handleReorder = async (row: InventoryRow) => {
+    setReordering(row.id);
+    try {
+      const res = await reorder({ inventoryId: row.id, institutionId: '', drugRef: row.drugId });
+      setReorderMsg(`✓ Ordered ${res.qtyRequested} units of ${res.drug}`);
+      setTimeout(() => setReorderMsg(null), 3000);
+    } catch (e) { setReorderMsg(`⚠ ${(e as Error).message}`); }
+    finally { setReordering(null); }
+  };
+
+  const lowCount = items.filter(r => r.lowStock || r.qtyOnHand === 0).length;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFF4E5" />
-
       <View style={styles.header}>
-        <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Back</Text>
+        <Pressable onPress={onBack} style={styles.backBtn}>
+          <Text style={styles.backText}>← Back</Text>
         </Pressable>
-        <View>
-          <Text style={styles.headerTitle}>Store Inventory</Text>
-          <Text style={styles.headerSubtitle}>Dhanvantari • Institution</Text>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.title}>Inventory</Text>
+            <Text style={styles.subtitle}>Dhanvantari · {items.length} SKUs</Text>
+          </View>
+          {lowCount > 0 && (
+            <View style={styles.alertBadge}>
+              <Text style={styles.alertText}>{lowCount} need reorder</Text>
+            </View>
+          )}
         </View>
       </View>
 
-      <View style={styles.kpiBand}>
-        <View style={styles.kpiCard}>
-          <Text style={styles.kpiLabel}>Stock value</Text>
-          <Text style={styles.kpiValue}>₹{(totalValue / 100000).toFixed(1)}L</Text>
-          <Text style={styles.kpiSubtext}>{mockDrugs.length} items</Text>
-        </View>
-        <View style={styles.kpiCard}>
-          <Text style={styles.kpiLabel}>Below reorder</Text>
-          <Text style={[styles.kpiValue, { color: '#F59E0B' }]}>{lowCount}</Text>
-          <Text style={styles.kpiSubtext}>need restock</Text>
-        </View>
-        <View style={styles.kpiCard}>
-          <Text style={styles.kpiLabel}>Expiring soon</Text>
-          <Text style={[styles.kpiValue, { color: '#1F6FEB' }]}>{expiringCount}</Text>
-          <Text style={styles.kpiSubtext}>within 90d</Text>
-        </View>
-        <View style={styles.kpiCard}>
-          <Text style={styles.kpiLabel}>Out of stock</Text>
-          <Text style={[styles.kpiValue, { color: '#EF4444' }]}>{criticalCount}</Text>
-          <Text style={styles.kpiSubtext}>urgent</Text>
-        </View>
-      </View>
+      {reorderMsg && (
+        <View style={styles.toast}><Text style={styles.toastText}>{reorderMsg}</Text></View>
+      )}
 
-      <View style={styles.searchBar}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by drug ID or name…"
-          placeholderTextColor="#A0AEC0"
-          value={searchText}
-          onChangeText={setSearchText}
-        />
-      </View>
+      <TextInput style={styles.search} placeholder="Search drug name…" placeholderTextColor="#94A3B8"
+        value={search} onChangeText={setSearch} />
 
       <View style={styles.filterBar}>
-        {statusTabs.map((status) => (
-          <Pressable
-            key={status}
-            onPress={() => setFilterStatus(status)}
-            style={[styles.filterTab, filterStatus === status && styles.filterTabActive]}
-          >
-            <Text style={[styles.filterTabText, filterStatus === status && styles.filterTabTextActive]}>
-              {status === 'ALL' ? 'ALL' : statusLabels[status]}
-            </Text>
+        {[['ALL', 'All'], ['low', 'Low'], ['critical', 'Out'], ['expiring', 'Expiring'], ['cold', 'Cold chain']].map(([v, l]) => (
+          <Pressable key={v} onPress={() => setFilter(v)}
+            style={[styles.filterTab, filter === v && styles.filterTabActive]}>
+            <Text style={[styles.filterText, filter === v && styles.filterTextActive]}>{l}</Text>
           </Pressable>
         ))}
       </View>
 
-      <FlatList
-        data={filteredDrugs}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <InventoryRow drug={item} onPress={() => {}} />}
-        contentContainerStyle={styles.listContent}
-        scrollEnabled={true}
-      />
+      {loading ? (
+        <View style={styles.center}><ActivityIndicator color="#D97706" size="large" /></View>
+      ) : error ? (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>⚠ {error}</Text>
+          <Pressable onPress={load} style={styles.retryBtn}><Text style={styles.retryText}>Retry</Text></Pressable>
+        </View>
+      ) : (
+        <FlatList data={filtered} keyExtractor={r => r.id}
+          renderItem={({ item }) => (
+            <InventoryCard row={item} onReorder={() => handleReorder(item)} />
+          )}
+          contentContainerStyle={styles.list} refreshing={loading} onRefresh={load} />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F5F7FA',
-  },
-  header: {
-    backgroundColor: '#FFF4E5',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEDCB4',
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    marginBottom: 8,
-  },
-  backButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#D97706',
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#111827',
-    letterSpacing: -0.5,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#475467',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginTop: 4,
-  },
-  kpiBand: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 12,
-    backgroundColor: '#F5F7FA',
-  },
-  kpiCard: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 12,
-  },
-  kpiLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    color: '#64748B',
-    textTransform: 'uppercase',
-  },
-  kpiValue: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#D97706',
-    marginTop: 8,
-    letterSpacing: -0.3,
-  },
-  kpiSubtext: {
-    fontSize: 10,
-    color: '#64748B',
-    marginTop: 3,
-  },
-  searchBar: {
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 8,
-    backgroundColor: '#F5F7FA',
-  },
-  searchInput: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D8E1EC',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#111827',
-  },
-  filterBar: {
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#F5F7FA',
-  },
-  filterTab: {
-    borderWidth: 1,
-    borderColor: '#D8E1EC',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#FFFFFF',
-  },
-  filterTabActive: {
-    backgroundColor: '#FFF4E5',
-    borderColor: '#D97706',
-  },
-  filterTabText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#526274',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  filterTabTextActive: {
-    color: '#D97706',
-  },
-  listContent: {
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-  },
-  inventoryRow: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    marginHorizontal: 8,
-    marginVertical: 6,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    flexDirection: 'row',
-    gap: 12,
-  },
-  drugInfo: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  drugId: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    color: '#64748B',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  drugName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111827',
-    letterSpacing: -0.2,
-  },
-  drugSubtext: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 3,
-  },
-  stockColumn: {
-    alignItems: 'center',
-    minWidth: 60,
-  },
-  expiryColumn: {
-    alignItems: 'center',
-    minWidth: 60,
-  },
-  statusColumn: {
-    justifyContent: 'center',
-    minWidth: 100,
-  },
-  columnLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.1,
-    color: '#64748B',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  columnValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    letterSpacing: -0.3,
-  },
-  columnSubtext: {
-    fontSize: 9,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  statusBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  statusText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
+  safe: { flex: 1, backgroundColor: '#F5F7FA' },
+  header: { backgroundColor: '#FFF4E5', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F5D9A0' },
+  backBtn: { alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 8, marginBottom: 8 },
+  backText: { fontSize: 14, fontWeight: '700', color: '#D97706' },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  title: { fontSize: 24, fontWeight: '800', color: '#111827', letterSpacing: -0.5 },
+  subtitle: { fontSize: 12, fontWeight: '700', color: '#475467', textTransform: 'uppercase', letterSpacing: 1, marginTop: 4 },
+  alertBadge: { backgroundColor: '#EF4444', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  alertText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  toast: { backgroundColor: '#111827', marginHorizontal: 12, marginTop: 8, borderRadius: 10, padding: 12 },
+  toastText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  search: { margin: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#D8E1EC', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: '#111827' },
+  filterBar: { flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingBottom: 10, flexWrap: 'wrap' },
+  filterTab: { borderWidth: 1, borderColor: '#D8E1EC', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#fff' },
+  filterTabActive: { backgroundColor: '#FFF4E5', borderColor: '#D97706' },
+  filterText: { fontSize: 10, fontWeight: '700', color: '#526274', textTransform: 'uppercase', letterSpacing: 0.8 },
+  filterTextActive: { color: '#D97706' },
+  list: { padding: 8 },
+  card: { backgroundColor: '#fff', borderRadius: 14, marginHorizontal: 8, marginVertical: 6, padding: 14, borderWidth: 1, borderColor: '#E2E8F0' },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
+  drugName: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  generic: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 8, alignSelf: 'flex-start' },
+  badgeText: { fontSize: 9, fontWeight: '700', color: '#fff', textTransform: 'uppercase', letterSpacing: 0.8 },
+  statsRow: { flexDirection: 'row', gap: 16, marginBottom: 10, flexWrap: 'wrap' },
+  stat: {},
+  statLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.8 },
+  statValue: { fontSize: 16, fontWeight: '700', color: '#111827', marginTop: 2 },
+  progressTrack: { height: 4, backgroundColor: '#E2E8F0', borderRadius: 2, overflow: 'hidden', marginBottom: 10 },
+  progressFill: { height: 4, borderRadius: 2 },
+  reorderBtn: { backgroundColor: '#111827', borderRadius: 10, padding: 10, alignItems: 'center' },
+  reorderText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  errorText: { fontSize: 13, color: '#EF4444', textAlign: 'center' },
+  retryBtn: { backgroundColor: '#D97706', borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10 },
+  retryText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });
