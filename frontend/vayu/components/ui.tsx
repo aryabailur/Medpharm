@@ -18,6 +18,8 @@ import {
   BORDER,
   C,
   countIn,
+  EASE_OUT,
+  EDGE,
   FONT,
   GRAD,
   HOVER,
@@ -55,11 +57,11 @@ export function PageHeader({
       }}
     >
       <div>
-        <h1 style={{ margin: 0, font: `600 18px/1.2 ${FONT}`, color: C.ink, letterSpacing: '-0.01em' }}>
+        <h1 style={{ margin: 0, ...TYPE.scaleH1, color: C.ink }}>
           {title}
         </h1>
         {subtitle && (
-          <div style={{ font: `400 12px/1.5 ${FONT}`, color: C.inkSoft, marginTop: 5 }}>{subtitle}</div>
+          <div style={{ ...TYPE.scaleCaption, color: C.inkSoft, marginTop: 5 }}>{subtitle}</div>
         )}
       </div>
       {right}
@@ -67,6 +69,12 @@ export function PageHeader({
   );
 }
 
+/**
+ * Base card. Same square-ish geometry as the handoff drew it — this stays the
+ * plain, static building block; `Panel` below is the elevated sibling with
+ * motion and hover. Both share one radius/shadow scale so a screen can mix
+ * them without the seams showing.
+ */
 export function Card({ children, style }: { children: ReactNode; style?: CSSProperties }) {
   return (
     <div
@@ -91,9 +99,9 @@ export function CardTitle({ children, right }: { children: ReactNode; right?: Re
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: 12,
-        padding: '10px 14px',
+        padding: '11px 14px',
         borderBottom: `1px solid ${C.borderSoft}`,
-        background: C.surfaceAlt,
+        background: GRAD.header,
       }}
     >
       <div style={LABEL}>{children}</div>
@@ -102,14 +110,21 @@ export function CardTitle({ children, right }: { children: ReactNode; right?: Re
   );
 }
 
+/**
+ * Status pill — part of a coherent badge family with `LiveChip` and
+ * `ScoreBadge`: same 20px optical height, same radius logic, same monospace
+ * label treatment, so the eye doesn't have to re-learn a shape per badge.
+ */
 export function Pill({ label, color, tint }: { label: string; color?: string; tint?: string }) {
   const auto = statusColors(label);
   return (
     <span
       style={{
-        display: 'inline-block',
-        padding: '2px 7px',
-        borderRadius: 3,
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: 20,
+        padding: '0 7px',
+        borderRadius: 4,
         background: tint ?? auto.tint,
         color: color ?? auto.color,
         font: `600 10px/1.5 ${MONO}`,
@@ -167,6 +182,7 @@ export function Kpi({
             font: `600 44px/1 ${MONO}`,
             letterSpacing: '-.04em',
             fontVariantNumeric: 'tabular-nums',
+            fontFeatureSettings: '"tnum" 1, "case" 1',
             color: C.ink,
           }}
         >
@@ -185,9 +201,34 @@ export function Kpi({
   );
 }
 
-export function Table({ head, children }: { head: string[]; children: ReactNode }) {
+/**
+ * Data table. `sticky` pins the header to the top of its scroll container —
+ * pair with a fixed-height wrapper. `zebra` adds a faint alternating wash on
+ * top of the existing hairline separators; `dense` tightens cell padding for
+ * a screen with many rows. All three default to the original look, so every
+ * existing call site renders exactly as before.
+ */
+export function Table({
+  head,
+  children,
+  sticky = false,
+  zebra = false,
+  dense = false,
+}: {
+  head: string[];
+  children: ReactNode;
+  /** Pin the header row via `position: sticky; top: 0`. */
+  sticky?: boolean;
+  /** Faint alternating row wash, layered under the hairline rules. */
+  zebra?: boolean;
+  /** Tighter cell padding for dense data screens. */
+  dense?: boolean;
+}) {
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+    <table
+      className={zebra ? 'mt-table-zebra' : undefined}
+      style={{ width: '100%', borderCollapse: 'collapse' }}
+    >
       <thead>
         <tr>
           {head.map((h) => (
@@ -195,11 +236,12 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
               key={h}
               style={{
                 textAlign: 'left',
-                padding: '8px 14px',
+                padding: dense ? '6px 12px' : '8px 14px',
                 ...LABEL,
                 borderBottom: BORDER.divider,
                 background: C.surfaceAlt,
                 whiteSpace: 'nowrap',
+                ...(sticky ? { position: 'sticky', top: 0, zIndex: 1 } : null),
               }}
             >
               {h}
@@ -212,7 +254,21 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
   );
 }
 
-export function Td({ children, style }: { children?: ReactNode; style?: CSSProperties }) {
+export function Td({
+  children,
+  style,
+  numeric = false,
+  hoverable = false,
+}: {
+  children?: ReactNode;
+  style?: CSSProperties;
+  /** Right-align + tabular figures, for a numeric column. */
+  numeric?: boolean;
+  /** Deprecated no-op retained for API stability — hover now lives on the
+   * enclosing `<tr>` via the `mt-row` class; wrap rows in that class instead. */
+  hoverable?: boolean;
+}) {
+  void hoverable;
   return (
     <td
       style={{
@@ -221,6 +277,9 @@ export function Td({ children, style }: { children?: ReactNode; style?: CSSPrope
         color: C.inkMuted,
         borderBottom: `1px solid ${C.borderSoft}`,
         verticalAlign: 'middle',
+        ...(numeric
+          ? { textAlign: 'right', fontFamily: MONO, fontVariantNumeric: 'tabular-nums' }
+          : null),
         ...style,
       }}
     >
@@ -233,6 +292,8 @@ export function Mono({ children, color }: { children: ReactNode; color?: string 
   return <span style={{ font: `500 12px/1.4 ${MONO}`, color: color ?? C.ink }}>{children}</span>;
 }
 
+/** Buttons depress on `:active` and lift a touch on hover via `.mt-btn` (see
+ * the global `<style>` block) — CSS-only, so this stays a plain function. */
 export function Button({
   children,
   onClick,
@@ -251,6 +312,7 @@ export function Button({
   };
   return (
     <button
+      className="mt-btn"
       onClick={onClick}
       disabled={disabled}
       style={{
@@ -268,7 +330,10 @@ export function Button({
   );
 }
 
-/** Segmented filter control, as used across the handoff's list screens. */
+/** Segmented filter control, as used across the handoff's list screens. The
+ * active pill slides via `left`/`width` transitions on the underlying
+ * buttons rather than a separate absolutely-positioned thumb, so it keeps
+ * working with any number of options without extra layout math. */
 export function Segmented({
   options,
   value,
@@ -294,6 +359,7 @@ export function Segmented({
               color: active ? C.bg : C.inkFaint,
               font: `600 11px/1.4 ${FONT}`,
               cursor: 'pointer',
+              transition: `background .16s ${EASE_OUT}, color .16s ${EASE_OUT}`,
             }}
           >
             {o.label}
@@ -342,8 +408,11 @@ export { Meter } from './charts';
 // ===========================================================================
 
 /**
- * Elevated card. Same square-ish geometry as `Card`, plus a warm shadow, an
- * optional accent hairline along the top edge, and an entrance animation.
+ * Elevated card \u2014 the workhorse container. Same square-ish geometry as
+ * `Card`, plus a warm shadow, an optional accent hairline along the top
+ * edge, an entrance animation, and (new) a resting/raised elevation choice
+ * and an optional gradient surface for a panel that wants to read as a
+ * step up from its neighbours (e.g. a hero/summary panel).
  */
 export function Panel({
   children,
@@ -351,6 +420,8 @@ export function Panel({
   accent,
   delayMs = 0,
   hover = false,
+  elevation = 'resting',
+  surface = 'flat',
 }: {
   children: ReactNode;
   style?: CSSProperties;
@@ -358,16 +429,21 @@ export function Panel({
   accent?: string;
   delayMs?: number;
   hover?: boolean;
+  /** Resting = `SHADOW.md` (default, unchanged). Raised = `SHADOW.lg`, for a
+   * panel that should visually sit above its neighbours without a hover. */
+  elevation?: 'resting' | 'raised';
+  /** 'flat' (default, unchanged) or 'wash' for a faint gradient body fill. */
+  surface?: 'flat' | 'wash';
 }) {
   return (
     <div
       className={hover ? 'mt-panel-hover' : undefined}
       style={{
         position: 'relative',
-        background: C.surface,
+        background: surface === 'wash' ? GRAD.band : C.surface,
         border: BORDER.card,
         borderRadius: 6,
-        boxShadow: SHADOW.md,
+        boxShadow: elevation === 'raised' ? SHADOW.lg : SHADOW.md,
         animation: riseScale(delayMs),
         transition: HOVER,
         ...style,
@@ -391,16 +467,27 @@ export function Panel({
   );
 }
 
-/** Panel header - gradient wash, optional status dot, label, and right slot. */
+/**
+ * Panel header \u2014 gradient wash, optional status dot, a real title (not just
+ * a label strip): `children` renders as the uppercase section label as
+ * before, and the new optional `title`/`subtitle` sit below it at body
+ * weight so a panel can carry an actual headline when it needs one.
+ */
 export function PanelTitle({
   children,
   right,
   dot,
+  title,
+  subtitle,
 }: {
   children: ReactNode;
   right?: ReactNode;
   /** Small status dot in this colour, left of the label. */
   dot?: string;
+  /** Optional headline rendered below the label, at H2 weight. */
+  title?: ReactNode;
+  /** Optional caption under the title. */
+  subtitle?: ReactNode;
 }) {
   return (
     <div
@@ -408,7 +495,7 @@ export function PanelTitle({
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        padding: '13px 16px',
+        padding: title ? '12px 16px 13px' : '13px 16px',
         borderBottom: `1px solid ${C.borderSoft}`,
         background: GRAD.header,
         borderRadius: '6px 6px 0 0',
@@ -423,25 +510,37 @@ export function PanelTitle({
             background: dot,
             boxShadow: `0 0 0 3px ${dot}1F`,
             flex: '0 0 6px',
+            marginTop: title ? 3 : 0,
+            alignSelf: title ? 'flex-start' : 'center',
           }}
         />
       )}
-      <div style={{ ...LABEL, letterSpacing: '.15em' }}>{children}</div>
-      <div style={{ flex: 1 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ ...LABEL, letterSpacing: '.15em' }}>{children}</div>
+        {title && (
+          <div style={{ ...TYPE.scaleH2, color: C.ink, marginTop: 3 }}>{title}</div>
+        )}
+        {subtitle && (
+          <div style={{ ...TYPE.scaleCaption, color: C.inkFaint, marginTop: 2 }}>{subtitle}</div>
+        )}
+      </div>
       {right}
     </div>
   );
 }
 
-/** A live "streaming" chip - pulsing dot plus label. Signals SSE is attached. */
+/** A live "streaming" chip - pulsing dot plus label. Signals SSE is attached.
+ * Scales gently on hover via `.mt-chip`, part of the shared badge family. */
 export function LiveChip({ label = 'live', color = C.green }: { label?: string; color?: string }) {
   return (
     <span
+      className="mt-chip"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
+        height: 20,
         gap: 6,
-        padding: '3px 9px 3px 7px',
+        padding: '0 9px 0 7px',
         borderRadius: 999,
         background: `${color}14`,
         border: `1px solid ${color}33`,
@@ -482,12 +581,18 @@ export function Trend({
   const flat = value === 0;
   const good = goodDirection === 'none' ? null : goodDirection === 'up' ? up : !up;
   const color = flat ? C.inkFaint : good == null ? C.inkFaint : good ? C.green : C.red;
+  const tint = flat ? C.greyTint : good == null ? C.greyTint : good ? C.greenTint : C.redTint;
   return (
     <span
+      className="mt-chip"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
+        height: 20,
         gap: 3,
+        padding: '0 7px',
+        borderRadius: 999,
+        background: tint,
         font: `600 11px/1 ${MONO}`,
         color,
         fontVariantNumeric: 'tabular-nums',
@@ -502,8 +607,11 @@ export function Trend({
 }
 
 /**
- * Hero KPI cell. Wider type ramp than `Kpi`, a sparkline slot, and an accent
- * marker. Use inside `KpiBand`.
+ * Hero KPI cell — the signature element. Wider type ramp than `Kpi`, an
+ * optional icon slot, an optional inline sparkline, a trend chip, and a
+ * hover lift (`.mt-kpi`, defined in the global `<style>` block). Use inside
+ * `KpiBand`. The figure animates in with `rollUp` instead of the plainer
+ * `countIn` so it reads as a number resolving into place, not just fading.
  */
 export function KpiHero({
   label,
@@ -513,6 +621,7 @@ export function KpiHero({
   accent = C.accent,
   spark,
   index = 0,
+  icon,
 }: {
   label: string;
   value: string | number;
@@ -521,6 +630,8 @@ export function KpiHero({
   accent?: string;
   spark?: ReactNode;
   index?: number;
+  /** Optional small icon/glyph slot, right-aligned beside the label. */
+  icon?: ReactNode;
 }) {
   return (
     <div
@@ -545,15 +656,24 @@ export function KpiHero({
             flex: '0 0 3px',
           }}
         />
-        <div style={{ ...LABEL, letterSpacing: '.15em' }}>{label}</div>
+        <div style={{ ...LABEL, letterSpacing: '.15em', flex: 1 }}>{label}</div>
+        {icon && (
+          <span style={{ color: accent, display: 'flex', alignItems: 'center', opacity: 0.85 }}>
+            {icon}
+          </span>
+        )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 12 }}>
+      <div
+        className="mt-kpi-value"
+        style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 12, transition: `transform .22s ${EASE_OUT}` }}
+      >
         <span
           style={{
             font: `600 40px/1 ${MONO}`,
             letterSpacing: TYPE.display,
             fontVariantNumeric: 'tabular-nums',
+            fontFeatureSettings: '"tnum" 1',
             color: C.ink,
             animation: countIn(120 + index * 55),
           }}
@@ -606,25 +726,26 @@ export function EmptyState({
     >
       <div
         style={{
-          width: 40,
-          height: 40,
-          borderRadius: 10,
+          width: 44,
+          height: 44,
+          borderRadius: 12,
           display: 'grid',
           placeItems: 'center',
-          background: C.raised,
+          background: GRAD.header,
           border: `1px solid ${C.borderSoft}`,
-          font: `400 17px/1 ${FONT}`,
+          boxShadow: SHADOW.sm,
+          font: `400 18px/1 ${FONT}`,
           color: tone,
-          marginBottom: 8,
+          marginBottom: 10,
         }}
       >
         {glyph}
       </div>
-      <div style={{ font: `600 13px/1.4 ${FONT}`, color: C.inkMuted }}>{title}</div>
+      <div style={{ ...TYPE.scaleH2, color: C.inkMuted }}>{title}</div>
       {hint && (
-        <div style={{ font: `400 12px/1.6 ${FONT}`, color: C.inkGhost, maxWidth: 300 }}>{hint}</div>
+        <div style={{ ...TYPE.scaleCaption, color: C.inkGhost, maxWidth: 320 }}>{hint}</div>
       )}
-      {action && <div style={{ marginTop: 10 }}>{action}</div>}
+      {action && <div style={{ marginTop: 12 }}>{action}</div>}
     </div>
   );
 }
@@ -645,7 +766,7 @@ export function Skeleton({
         height,
         width,
         borderRadius: radius,
-        background: C.raised,
+        background: `linear-gradient(90deg,${C.raised} 0%,${C.borderSoft} 50%,${C.raised} 100%)`,
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -654,7 +775,7 @@ export function Skeleton({
         style={{
           position: 'absolute',
           inset: 0,
-          background: 'linear-gradient(90deg,transparent 0%,#FFFFFFAA 50%,transparent 100%)',
+          background: 'linear-gradient(90deg,transparent 0%,#FFFFFFB0 50%,transparent 100%)',
           animation: shimmer(1.6),
         }}
       />
@@ -698,15 +819,19 @@ export function ScoreBadge({
       style={{
         display: 'inline-flex',
         alignItems: 'stretch',
-        borderRadius: 4,
+        height: 22,
+        borderRadius: 5,
         overflow: 'hidden',
         border: `1px solid ${color}33`,
         background: tint,
+        boxShadow: SHADOW.sm,
       }}
     >
       <span
         style={{
-          padding: '3px 8px',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 8px',
           font: `600 13px/1.3 ${MONO}`,
           fontVariantNumeric: 'tabular-nums',
           letterSpacing: '-.02em',
@@ -718,7 +843,9 @@ export function ScoreBadge({
       </span>
       <span
         style={{
-          padding: '3px 8px',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 8px',
           font: `600 10px/1.6 ${MONO}`,
           letterSpacing: '.06em',
           color,
@@ -739,5 +866,227 @@ export function SectionRule({ children, right }: { children: ReactNode; right?: 
       <div style={{ flex: 1, height: 1, background: C.borderSoft }} />
       {right}
     </div>
+  );
+}
+
+// ===========================================================================
+// NEW PRIMITIVES — additive, server-renderable (CSS-only interactivity).
+// ===========================================================================
+
+/**
+ * A labelled value on one line — label left, value right, hairline beneath.
+ * The compact alternative to a full `Kpi`/`KpiHero` cell for a dense panel
+ * (e.g. a details drawer, a summary list).
+ */
+export function StatRow({
+  label,
+  value,
+  valueColor,
+  hairline = true,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  valueColor?: string;
+  /** Draw the bottom hairline (default) or omit it for the last row. */
+  hairline?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        padding: '9px 0',
+        borderBottom: hairline ? `1px solid ${C.borderSoft}` : 'none',
+      }}
+    >
+      <span style={{ ...TYPE.scaleCaption, color: C.inkFaint }}>{label}</span>
+      <span
+        style={{
+          font: `600 13px/1.3 ${MONO}`,
+          fontVariantNumeric: 'tabular-nums',
+          color: valueColor ?? C.ink,
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** A plain hairline divider, horizontal by default. Use inside a panel body
+ * to separate stacked content without reaching for `SectionRule`'s label. */
+export function Divider({
+  vertical = false,
+  style,
+}: {
+  vertical?: boolean;
+  style?: CSSProperties;
+}) {
+  return (
+    <div
+      style={{
+        background: C.borderSoft,
+        ...(vertical ? { width: 1, alignSelf: 'stretch' } : { height: 1, width: '100%' }),
+        ...style,
+      }}
+    />
+  );
+}
+
+/**
+ * CSS-only tooltip. Wrap a trigger element; the tooltip renders as a sibling
+ * that fades/slides in on `:hover` via `.mt-tooltip-wrap` / `.mt-tooltip` in
+ * the global stylesheet — no JS, no portal, safe in a server component.
+ */
+export function Tooltip({
+  children,
+  label,
+  side = 'top',
+}: {
+  children: ReactNode;
+  label: ReactNode;
+  side?: 'top' | 'bottom';
+}) {
+  return (
+    <span className="mt-tooltip-wrap" style={{ display: 'inline-flex' }}>
+      {children}
+      <span
+        className="mt-tooltip"
+        style={{
+          position: 'absolute',
+          left: '50%',
+          [side === 'top' ? 'bottom' : 'top']: 'calc(100% + 6px)',
+          transform: 'translateX(-50%)',
+          background: C.ink,
+          color: C.bg,
+          font: `500 11px/1.4 ${FONT}`,
+          padding: '5px 8px',
+          borderRadius: 5,
+          whiteSpace: 'nowrap',
+          boxShadow: SHADOW.md,
+          zIndex: 20,
+        }}
+      >
+        {label}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Icon-only button — a hit-target for a `lucide-react` icon or any small
+ * glyph. Hover/active feedback via `.mt-icon-btn` in the global stylesheet.
+ */
+export function IconButton({
+  children,
+  onClick,
+  label,
+  active = false,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  /** Accessible label — required since the button is icon-only. */
+  label: string;
+  active?: boolean;
+}) {
+  return (
+    <button
+      className="mt-icon-btn"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 28,
+        height: 28,
+        borderRadius: 6,
+        border: `1px solid ${active ? EDGE.medium : 'transparent'}`,
+        background: active ? C.raised : 'transparent',
+        color: active ? C.ink : C.inkFaint,
+        cursor: 'pointer',
+        padding: 0,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Toolbar row — a horizontal strip for filters/actions above a table or
+ * panel body, with consistent gap and a hairline beneath.
+ */
+export function Toolbar({
+  children,
+  right,
+}: {
+  children: ReactNode;
+  right?: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '10px 16px',
+        borderBottom: `1px solid ${C.borderSoft}`,
+        background: C.surfaceAlt,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+        {children}
+      </div>
+      {right && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{right}</div>}
+    </div>
+  );
+}
+
+/**
+ * A signed metric delta with an inline mini-context — like `Trend`, but
+ * pairs the direction glyph with a plain-language comparison (e.g. "vs last
+ * week") instead of standing alone in a KPI header. Useful in a table cell
+ * or a stat list where `Trend`'s pill would be too loud.
+ */
+export function MetricDelta({
+  value,
+  suffix = '',
+  goodDirection = 'up',
+  compareLabel,
+}: {
+  value: number;
+  suffix?: string;
+  goodDirection?: 'up' | 'down' | 'none';
+  compareLabel?: string;
+}) {
+  const up = value > 0;
+  const flat = value === 0;
+  const good = goodDirection === 'none' ? null : goodDirection === 'up' ? up : !up;
+  const color = flat ? C.inkFaint : good == null ? C.inkFaint : good ? C.green : C.red;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5 }}>
+      <span
+        style={{
+          font: `600 12px/1 ${MONO}`,
+          color,
+          fontVariantNumeric: 'tabular-nums',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+        }}
+      >
+        <span style={{ font: `600 9px/1 ${FONT}` }}>{flat ? '→' : up ? '▲' : '▼'}</span>
+        {up && !flat ? '+' : ''}
+        {value}
+        {suffix}
+      </span>
+      {compareLabel && (
+        <span style={{ font: `400 11px/1.3 ${FONT}`, color: C.inkGhost }}>{compareLabel}</span>
+      )}
+    </span>
   );
 }

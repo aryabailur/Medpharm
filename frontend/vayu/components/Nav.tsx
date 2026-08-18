@@ -21,7 +21,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getShipments } from '../lib/api';
-import { C, EASE, FONT, GRAD, MONO, pulse, SHADOW, SHELL } from '../lib/theme';
+import { C, EASE, EASE_IN_OUT, EASE_OUT, FONT, GRAD, MONO, pulse, SHADOW, SHELL } from '../lib/theme';
 
 const IN_FLIGHT = ['DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'];
 
@@ -82,12 +82,21 @@ function activeScreen(pathname: string): Screen {
   return ALL.find((s) => s.href !== '/' && pathname.startsWith(s.href)) ?? ALL[0]!;
 }
 
-/** Small inline monogram — a stylised "V" cut by a diagonal, echoing a manifold/valve. */
+/** Small inline monogram — a stylised "V" cut by a diagonal, echoing a
+ * manifold/valve. A soft outer glow gives the mark a touch of depth against
+ * the dark command bar instead of sitting perfectly flat. */
 function Monogram({ hue }: { hue: string }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
-      <rect x="0.5" y="0.5" width="21" height="21" rx="5" fill={hue} fillOpacity="0.16" stroke={hue} strokeOpacity="0.5" />
-      <path d="M6 6.5L11 15.5L16 6.5" stroke={hue} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      width="26"
+      height="26"
+      viewBox="0 0 22 22"
+      fill="none"
+      aria-hidden="true"
+      style={{ filter: `drop-shadow(0 0 8px ${hue}3D)`, flex: '0 0 26px' }}
+    >
+      <rect x="0.5" y="0.5" width="21" height="21" rx="6" fill={hue} fillOpacity="0.18" stroke={hue} strokeOpacity="0.55" />
+      <path d="M6 6.5L11 15.5L16 6.5" stroke={hue} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -251,29 +260,23 @@ export default function Nav() {
 
         <button
           onClick={() => setPalette(true)}
+          className="mt-searchfield"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: 10,
             alignSelf: 'center',
             marginRight: 14,
-            background: 'rgba(255,255,255,0.06)',
-            border: `1px solid rgba(255,255,255,0.12)`,
-            borderRadius: SHELL.radius,
-            padding: '8px 11px',
+            background: 'rgba(255,255,255,0.07)',
+            border: `1px solid rgba(255,255,255,0.13)`,
+            borderRadius: 7,
+            padding: '8px 12px',
             flex: '1 6 220px',
             minWidth: 130,
             maxWidth: 280,
             cursor: 'pointer',
-            transition: `background .16s ${EASE}, border-color .16s ${EASE}`,
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
-            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
+            boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.18)',
+            transition: `background .16s ${EASE_OUT}, border-color .16s ${EASE_OUT}, box-shadow .16s ${EASE_OUT}`,
           }}
         >
           <span style={{ font: `400 12px/1 ${MONO}`, color: 'rgba(255,255,255,0.4)' }}>⌕</span>
@@ -369,7 +372,7 @@ export default function Nav() {
                 letterSpacing: '.12em',
                 textTransform: 'uppercase',
                 cursor: 'pointer',
-                transition: `color .16s ${EASE}`,
+                transition: `color .16s ${EASE_OUT}`,
               }}
             >
               <span style={{ font: `500 10px/1 ${MONO}`, color: active ? IDENTITY : C.inkSoft }}>{d.idx}</span>
@@ -386,7 +389,7 @@ export default function Nav() {
                   transform: active ? 'scaleX(1)' : 'scaleX(0)',
                   opacity: active ? 1 : 0,
                   transformOrigin: 'center',
-                  transition: `transform .28s ${EASE}, opacity .28s ${EASE}`,
+                  transition: `transform .26s ${EASE_IN_OUT}, opacity .26s ${EASE_IN_OUT}`,
                 }}
               />
             </button>
@@ -516,15 +519,15 @@ export default function Nav() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(15,14,12,0.45)',
-            backdropFilter: 'blur(3px)',
-            WebkitBackdropFilter: 'blur(3px)',
+            background: 'rgba(15,14,12,0.5)',
+            backdropFilter: 'blur(4px)',
+            WebkitBackdropFilter: 'blur(4px)',
             zIndex: 50,
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'center',
             paddingTop: '12vh',
-            animation: 'mtFade .14s ease both',
+            animation: 'mtFade .16s ease both',
           }}
         >
           <div
@@ -534,10 +537,10 @@ export default function Nav() {
               maxWidth: '92vw',
               background: C.surface,
               border: `1px solid ${C.border}`,
-              borderRadius: 8,
+              borderRadius: 10,
               overflow: 'hidden',
               boxShadow: SHADOW.lg,
-              animation: `mtRiseScale .24s ${EASE} both`,
+              animation: `mtScaleIn .22s cubic-bezier(.34,1.56,.64,1) both`,
             }}
           >
             <div
@@ -602,15 +605,15 @@ export default function Nav() {
                     <div key={d.label}>
                       <div
                         style={{
-                          padding: '7px 16px',
-                          font: `600 10px/1.5 ${MONO}`,
-                          letterSpacing: '.12em',
+                          padding: '8px 16px 6px',
+                          font: `700 10px/1.5 ${MONO}`,
+                          letterSpacing: '.14em',
                           textTransform: 'uppercase',
                           color: C.inkGhost,
                           background: C.surfaceAlt,
                         }}
                       >
-                        {d.idx} {d.label}
+                        {d.idx} · {d.label}
                       </div>
                       {domainHits.map((s) => {
                         const i = hits.indexOf(s);
@@ -631,15 +634,20 @@ export default function Nav() {
                               background: highlighted ? C.accentTint : 'transparent',
                               cursor: 'pointer',
                               textAlign: 'left',
-                              transition: `background .1s ${EASE}`,
+                              transition: `background .12s ${EASE_OUT}, border-color .12s ${EASE_OUT}`,
                             }}
                           >
-                            <span style={{ flex: 1, font: `500 13px/1 ${FONT}`, color: C.ink }}>{s.title}</span>
+                            <span style={{ flex: 1, font: `${highlighted ? 600 : 500} 13px/1 ${FONT}`, color: C.ink }}>
+                              {s.title}
+                            </span>
                             <span
                               style={{
-                                font: `400 10px/1 ${MONO}`,
+                                font: `500 10px/1 ${MONO}`,
                                 letterSpacing: '.06em',
-                                color: C.inkSoft,
+                                color: highlighted ? IDENTITY : C.inkSoft,
+                                padding: '3px 6px',
+                                borderRadius: 3,
+                                background: highlighted ? `${IDENTITY}14` : 'transparent',
                               }}
                             >
                               SCREEN
